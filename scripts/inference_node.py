@@ -141,11 +141,8 @@ class InferenceNode(Node):
         # BGRA(4チャンネル)の場合は、余分なAlphaだけ削って3チャンネル(BGR)にする
         bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
 
-        # ネットワークに入力する関心領域(ROI)のみをクロップ(x:40〜440)
-        cropped_image = bgr_image[:, 40:440]
-
-        # 学習時と同じサイズ(64x48)へリサイズ(バイリニア補間)
-        resized_image = cv2.resize(cropped_image, (64, 48), interpolation=cv2.INTER_LINEAR)
+        # トリミングせず、そのまま学習時と同じサイズ(64x48)へリサイズ(バイリニア補間)
+        resized_image = cv2.resize(bgr_image, (64, 48), interpolation=cv2.INTER_LINEAR)
 
         # PyTorchのfloat32テンソルに変換し、[0, 1]スケールへ正規化
         image_normalized = resized_image.astype(np.float32) / 255.0
@@ -185,10 +182,9 @@ class InferenceNode(Node):
 
         # --- デバッグ表示用（AIに入力されるBGR画像を可視化） ---
         if self.debug_mode_:
-            # RGB変換せずに、入力のままの画像（アルファ抜き等の処理用）をトリミング
+            # トリミングせずにそのままリサイズして配信
             bgr_image = cv_image[:, :, :3] if cv_image.shape[2] == 4 else cv_image
-            cropped_image = bgr_image[:, 40:440]
-            resized_input = cv2.resize(cropped_image, (64, 48))
+            resized_input = cv2.resize(bgr_image, (64, 48))
             debug_msg = self.bridge.cv2_to_imgmsg(resized_input, encoding='bgr8')
             debug_msg.header = header
             self.pub_debug_image.publish(debug_msg)

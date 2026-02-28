@@ -55,10 +55,8 @@ class E2EDataset(Dataset):
             reader = csv.DictReader(f)
             waypoints = [[float(row['x']), float(row['y'])] for row in reader]
 
-        # ネットワークに入力する関心領域(ROI)のみをクロップ(x:40〜440)
-        cropped_image = image_bgr[:, 40:440]
-        # 学習用に指定サイズ(IMAGE_WIDTH x IMAGE_HEIGHT)へリサイズ(ニアレストネイバー補間またはバイリニア補間)
-        resized_image = cv2.resize(cropped_image, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
+        # 画像のクロップ（トリミング）を廃止し、全体をそのまま指定サイズ(IMAGE_WIDTH x IMAGE_HEIGHT)へリサイズ
+        resized_image = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
 
         # PyTorchで扱えるようにfloat32へ変換し、[0, 255]の値を[0, 1]に正規化
         image_normalized = resized_image.astype(np.float32) / 255.0

@@ -47,9 +47,8 @@ class E2EDataset(Dataset):
         mask_file = self.mask_files[idx]
         csv_file = self.path_dir / f'{mask_file.stem}.csv'
 
-        # OpenCVを用いて画像(BGR形式)を読み込み、RGB形式に変換
+        # OpenCVを用いて画像(BGR形式)を読み込む
         image_bgr = cv2.imread(str(mask_file), cv2.IMREAD_COLOR)
-        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
         # CSVファイルからウェイポイント(x, y)を読み込む
         with open(csv_file, 'r') as f:
@@ -57,7 +56,7 @@ class E2EDataset(Dataset):
             waypoints = [[float(row['x']), float(row['y'])] for row in reader]
 
         # ネットワークに入力する関心領域(ROI)のみをクロップ(x:40〜440)
-        cropped_image = image_rgb[:, 40:440]
+        cropped_image = image_bgr[:, 40:440]
         # 学習用に指定サイズ(IMAGE_WIDTH x IMAGE_HEIGHT)へリサイズ(ニアレストネイバー補間またはバイリニア補間)
         resized_image = cv2.resize(cropped_image, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
 

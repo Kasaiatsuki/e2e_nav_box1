@@ -134,12 +134,15 @@ class InferenceNode(Node):
         """
         カメラ画像を受け取り、特定範囲をクロップ・リサイズして、
         AIモデルに入力するためのPyTorchのテンソル（[1, 3, 48, 64]の形）に変換します。
+        
+        高速化のため、ZEDやOpenCVのデフォルトフォーマットであるBGR/BGRAから
+        RGBへの変換を行わず、そのまま（Alphaチャンネルがあれば除去してBGRのまま）処理します。
         """
-        # BGR画像をRGB画像に変換
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB) if image.shape[2] == 4 else cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # BGRA(4チャンネル)の場合は、余分なAlphaだけ削って3チャンネル(BGR)にする
+        bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
 
         # ネットワークに入力する関心領域(ROI)のみをクロップ(x:40〜440)
-        cropped_image = rgb_image[:, 40:440]
+        cropped_image = bgr_image[:, 40:440]
 
         # 学習時と同じサイズ(64x48)へリサイズ(バイリニア補間)
         resized_image = cv2.resize(cropped_image, (64, 48), interpolation=cv2.INTER_LINEAR)
@@ -180,10 +183,11 @@ class InferenceNode(Node):
         # OpenCVの画像を、AIが読めるPyTorchのテンソル形式（float32, 1x3x48x64など）に変換
         input_tensor = self.preprocess_image(cv_image)
 
-        # --- デバッグ表示用（AIに入力されるRGB画像を可視化） ---
+        # --- デバッグ表示用（AIに入力されるBGR画像を可視化） ---
         if self.debug_mode_:
-            rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGRA2BGR)
-            cropped_image = rgb_image[:, 40:440]
+            # RGB変換せずに、入力のままの画像（アルファ抜き等の処理用）をトリミング
+            bgr_image = cv_image[:, :, :3] if cv_image.shape[2] == 4 else cv_image
+            cropped_image = bgr_image[:, 40:440]
             resized_input = cv2.resize(cropped_image, (64, 48))
             debug_msg = self.bridge.cv2_to_imgmsg(resized_input, encoding='bgr8')
             debug_msg.header = header

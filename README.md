@@ -103,4 +103,5 @@ ros2 run e2e_nav_box1 pure_pursuit_node
 
 ## 📜 ライセンス (License)
 
-This repository is licensed under the MIT License.
+このソフトウェアパッケージは、3条項BSDライセンスの下、再頒布および使用が許可されます。
+© 2026 Atsuki Kasai

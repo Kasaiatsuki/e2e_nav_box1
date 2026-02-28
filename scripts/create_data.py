@@ -57,6 +57,10 @@ class DataCollectionNode(Node):
         self.declare_parameter('sdk_flag', False)
         self.sdk_flag_ = self.get_parameter('sdk_flag').value
 
+        # ジョイコントローラによるデータ収集の開始/一時停止を切り替えるボタンの番号(デフォルトは1)
+        self.declare_parameter('joy_button_toggle', 1)
+        self.joy_button_toggle = self.get_parameter('joy_button_toggle').value
+
         self.bridge: CvBridge = CvBridge()
         
         # ROSトピック経由で取得した最新データを保持する変数
@@ -73,7 +77,7 @@ class DataCollectionNode(Node):
 
         # データ収集のオン/オフ状態管理
         self.is_paused: bool = True
-        self.prev_button_state: int = 0
+        self.last_joy_buttons: List[int] = []
 
         # ZED SDK用の変数
         self.zed_camera: Optional[sl.Camera] = None
@@ -167,11 +171,16 @@ class DataCollectionNode(Node):
         return np.array(points_list, dtype=np.float32)
 
     def joy_callback(self, msg: Joy) -> None:
-        """ジョイスティック入力コールバック。ボタン[2]でデータ収集の再生/一時停止を切り替える"""
-        if len(msg.buttons) > 2:
-            current_button_state = msg.buttons[2]
-            # ボタンが押された瞬間(0->1)にトグル処理
-            if current_button_state == 1 and self.prev_button_state == 0:
+        """ジョイスティック入力コールバック。指定されたボタンの押下エッジ検出でデータ収集の再生/一時停止を切り替える"""
+        current_buttons = msg.buttons
+        
+        # ボタンの状態変化を検出（押下のエッジ検出）
+        if len(self.last_joy_buttons) == len(current_buttons):
+            # トグルボタンが押された（OFF -> ON）
+            if (len(current_buttons) > self.joy_button_toggle and 
+                current_buttons[self.joy_button_toggle] == 1 and 
+                self.last_joy_buttons[self.joy_button_toggle] == 0):
+                
                 self.is_paused = not self.is_paused
                 if self.is_paused:
                     self.get_logger().info('⏸️ Data collection paused')
@@ -181,7 +190,8 @@ class DataCollectionNode(Node):
                     self.samples.clear()
                     self.last_sample_time = None
                     self.get_logger().info('▶️ Data collection resumed')
-            self.prev_button_state = current_button_state
+        
+        self.last_joy_buttons = list(current_buttons)
 
     def timer_callback(self) -> None:
         """定期的に呼び出されるメインの処理。データのサンプリングとウェイポイント収集を行う"""

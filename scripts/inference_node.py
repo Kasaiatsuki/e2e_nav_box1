@@ -251,9 +251,8 @@ class InferenceNode(Node):
         # 車の「現在地(x=0.0, y=0.0)」を先頭に追加（これから走る軌道の起点を明確にするため）
         path_msg.poses.append(PoseStamped(header=path_msg.header, pose=Pose(position=Point(x=0.0, y=0.0))))
         
-        # ⚠️ (注意): 元のコードではここでリストを上書き代入しているため、上の現在地(0,0)が消えてしまっています。
-        # AIの出力した10個のウェイポイントを追加します（本来は .extend() などで繋ぐ運用が望ましいです）
-        path_msg.poses = [PoseStamped(header=path_msg.header, pose=Pose(position=Point(x=float(x), y=float(y)))) for x, y in waypoints]
+        # AIの出力した10個のウェイポイントを、先頭の現在地に「追加（extendで結合）」します
+        path_msg.poses.extend([PoseStamped(header=path_msg.header, pose=Pose(position=Point(x=float(x), y=float(y)))) for x, y in waypoints])
 
         return path_msg
 

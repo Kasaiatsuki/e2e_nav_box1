@@ -47,28 +47,24 @@ class E2EDataset(Dataset):
         mask_file = self.mask_files[idx]
         csv_file = self.path_dir / f'{mask_file.stem}.csv'
 
-        # OpenCVを用いて画像(BGR形式)を読み込む
-        mask_bgr = cv2.imread(str(mask_file), cv2.IMREAD_COLOR)
+        # OpenCVを用いて画像(BGR形式)を読み込み、RGB形式に変換
+        image_bgr = cv2.imread(str(mask_file), cv2.IMREAD_COLOR)
+        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
         # CSVファイルからウェイポイント(x, y)を読み込む
         with open(csv_file, 'r') as f:
             reader = csv.DictReader(f)
             waypoints = [[float(row['x']), float(row['y'])] for row in reader]
 
-        # 特定の色領域(背景など)を除外し、道路や目標領域を抽出するためのバイナリマスクを作成
-        # BGRにおいて、赤(Red)が強く、青(Blue)と緑(Green)が弱いピクセルを抽出している
-        # 赤コーン対策？yolopv2でセグメンテーションされた部分の二値化？
-        mask_binary = ((mask_bgr[:, :, 2] > 200) & (mask_bgr[:, :, 0] < 50) & (mask_bgr[:, :, 1] < 50)).astype(np.uint8)
-
         # ネットワークに入力する関心領域(ROI)のみをクロップ(x:40〜440)
-        # 縦は残して横を切っている。右の方が切ってる？
-        cropped_mask = mask_binary[:, 40:440]
-        # 学習用に指定サイズ(IMAGE_WIDTH x IMAGE_HEIGHT)へリサイズ(ニアレストネイバー補間)
-        resized_mask = cv2.resize(cropped_mask, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_NEAREST)
+        cropped_image = image_rgb[:, 40:440]
+        # 学習用に指定サイズ(IMAGE_WIDTH x IMAGE_HEIGHT)へリサイズ(ニアレストネイバー補間またはバイリニア補間)
+        resized_image = cv2.resize(cropped_image, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
 
-        # PyTorchで扱えるようにfloat32へ変換し、チャンネルの次元(dim=0)を追加する
-        mask_normalized = resized_mask.astype(np.float32)
-        mask_tensor = torch.from_numpy(mask_normalized).unsqueeze(0)
+        # PyTorchで扱えるようにfloat32へ変換し、[0, 255]の値を[0, 1]に正規化
+        image_normalized = resized_image.astype(np.float32) / 255.0
+        # HWC (Height, Width, Channels) から CHW (Channels, Height, Width) の順に並べ替える
+        image_tensor = torch.from_numpy(image_normalized).permute(2, 0, 1)
 
         # ウェイポイントのリストをテンソルに変換し、1次元に平坦化する
         waypoints_tensor = torch.tensor(waypoints, dtype=torch.float32).flatten()

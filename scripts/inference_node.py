@@ -25,8 +25,6 @@ try:
 except ImportError:
     ZED_SDK_AVAILABLE = False
 
-from util.yolop_processor import YOLOPv2Processor
-
 def denormalize_waypoints(normalized: np.ndarray) -> np.ndarray:
     """
     モデルが出力した正規化された範囲（-1.0〜1.0）のWaypoint座標を、
@@ -68,10 +66,9 @@ class InferenceNode(Node):
         self.zed_runtime_params: Optional[sl.RuntimeParameters] = None
 
         # ROS 2環境下でパッケージがインストールされた共有ディレクトリ(share)の絶対パスを取得し、
-        # E2Eモデル(train.pyで作ったもの)と、道路認識用のYOLOPv2モデルの場所を特定する
+        # E2Eモデル(train.pyで作ったもの)の場所を特定する
         package_share_directory = get_package_share_directory('e2e_nav_box1')
         weight_path = os.path.join(package_share_directory, 'weights', model_path)
-        yolop_weight_path = FilePath(package_share_directory) / 'weights' / 'yolopv2.pt'
 
         # E2E Plannerモデルの読み込み
         if os.path.exists(weight_path):
@@ -82,9 +79,6 @@ class InferenceNode(Node):
         else:
             self.get_logger().warn(f'Model file not found: {weight_path}')
             self.model = None
-
-        # セグメンテーション(道路色抽出)を担当するYOLOPv2モデルのインスタンス化
-        self.yolop_processor = YOLOPv2Processor(yolop_weight_path, self.device)
 
         # ROS 2トピックのサブスクライバー（購読者）の設定
         # ZED SDKを使わない場合、カメラからの画像トピックを受け取って最新画像を確保し続ける
@@ -136,20 +130,26 @@ class InferenceNode(Node):
             return resized_image
         return None
 
-    def preprocess_image(self, image: np.ndarray) -> Tuple[torch.Tensor, np.ndarray]:
+    def preprocess_image(self, image: np.ndarray) -> torch.Tensor:
         """
-        カメラ画像を受け取り、YOLOPv2を使って道路や対象物などの環境領域（マスク）を抽出し、
-        AIモデルに入力するためのPyTorchのテンソル（[1, 1, 48, 64]の形）に変換します。
+        カメラ画像を受け取り、特定範囲をクロップ・リサイズして、
+        AIモデルに入力するためのPyTorchのテンソル（[1, 3, 48, 64]の形）に変換します。
         """
-        bgr_image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+        # BGR画像をRGB画像に変換
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB) if image.shape[2] == 4 else cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        # YOLOPv2によるマスク画像（二値化画像）の作成とリサイズ
-        mask = self.yolop_processor.process_image(bgr_image, (64, 48))
+        # ネットワークに入力する関心領域(ROI)のみをクロップ(x:40〜440)
+        cropped_image = rgb_image[:, 40:440]
 
-        # numpy配列(uint8)をPyTorchのfloat32テンソルに変換し、バッチとチャンネル用の次元(unsqueeze)を追加
-        mask_normalized = mask.astype(np.float32)
-        tensor = torch.from_numpy(mask_normalized).unsqueeze(0).unsqueeze(0)
-        return tensor.to(self.device), mask
+        # 学習時と同じサイズ(64x48)へリサイズ(バイリニア補間)
+        resized_image = cv2.resize(cropped_image, (64, 48), interpolation=cv2.INTER_LINEAR)
+
+        # PyTorchのfloat32テンソルに変換し、[0, 1]スケールへ正規化
+        image_normalized = resized_image.astype(np.float32) / 255.0
+
+        # 次元をHWCからCHWに変更し、バッチ次元(unsqueeze)を追加
+        tensor = torch.from_numpy(image_normalized).permute(2, 0, 1).unsqueeze(0)
+        return tensor.to(self.device)
 
     def image_callback(self, msg: Image) -> None:
         self.latest_image = msg
@@ -177,13 +177,14 @@ class InferenceNode(Node):
             header = self.latest_image.header
 
         # --- 2. データの前処理 ---
-        # OpenCVの画像を、AIが読めるPyTorchのテンソル形式（float32, 1x1x48x64など）に変換
-        input_tensor, mask = self.preprocess_image(cv_image)
+        # OpenCVの画像を、AIが読めるPyTorchのテンソル形式（float32, 1x3x48x64など）に変換
+        input_tensor = self.preprocess_image(cv_image)
 
-        # --- デバッグ表示用（AIが赤いコーンや道路をどう認識しているかを可視化） ---
+        # --- デバッグ表示用（AIに入力されるRGB画像を可視化） ---
         if self.debug_mode_:
-            resized_input = cv2.resize(cv2.cvtColor(cv_image, cv2.COLOR_BGRA2BGR), (64, 48))
-            resized_input[mask == 1] = [0, 0, 255] # 推論に使われるマスク部分を赤色で塗りつぶし
+            rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGRA2BGR)
+            cropped_image = rgb_image[:, 40:440]
+            resized_input = cv2.resize(cropped_image, (64, 48))
             debug_msg = self.bridge.cv2_to_imgmsg(resized_input, encoding='bgr8')
             debug_msg.header = header
             self.pub_debug_image.publish(debug_msg)

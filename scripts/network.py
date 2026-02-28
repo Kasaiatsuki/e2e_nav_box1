@@ -12,9 +12,9 @@ class Network(nn.Module):
     def __init__(self, num_waypoints: int = 10):
         super(Network, self).__init__()
 
-        # Conv層1: 入力チャンネル1、出力チャンネル32、カーネルサイズ8、ストライド4
+        # Conv層1: 入力チャンネル3 (RGB画像)、出力チャンネル32、カーネルサイズ8、ストライド4
         # 画像の特徴量を大まかに抽出する最初の層
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=8, stride=4)
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=8, stride=4)
         
         # Conv層2: 入力チャンネル32、出力チャンネル64、カーネルサイズ3、ストライド2
         # より中程度のレベルの特徴量を抽出する層

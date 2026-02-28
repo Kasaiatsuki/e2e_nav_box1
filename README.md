@@ -99,6 +99,11 @@ ros2 run e2e_nav_box1 pure_pursuit_node
 
 > ⚠️ 注意: 走行中は必ずロボットの緊急停止スイッチを持った状態でテストを行ってください。
 
+## 🙏 謝辞 (Acknowledgements)
+
+本プロジェクトを開発するにあたり、以下のオープンソースリポジトリ・プロジェクトを参考にさせていただきました。
+- [Reference Project Name](https://github.com/Username/ReferenceRepo) : （ここに参考にした具体的な機能や技術の簡単な説明、例：「End-to-End学習のデータ収集アーキテクチャおよびPyTorch推論ノードの実装の基礎とさせていただきました。」）
+
 ---
 
 ## 📜 ライセンス (License)

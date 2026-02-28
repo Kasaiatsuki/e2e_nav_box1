@@ -102,8 +102,8 @@ ros2 run e2e_nav_box1 pure_pursuit_node
 ## 🙏 謝辞 (Acknowledgements)
 
 本プロジェクトを開発するにあたり、以下のオープンソースリポジトリ・プロジェクトを参考にさせていただきました。
-- [Reference Project Name](https://github.com/Username/ReferenceRepo) : （ここに参考にした具体的な機能や技術の簡単な説明、例：「End-to-End学習のデータ収集アーキテクチャおよびPyTorch推論ノードの実装の基礎とさせていただきました。」）
-
+- [aiformula](https://github.com/open-rdc/aiformula/tree/feat/e2e)
+- [e2enav](https://github.com/kyo0221/e2enav) 
 ---
 
 ## 📜 ライセンス (License)

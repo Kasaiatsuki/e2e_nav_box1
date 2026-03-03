@@ -72,7 +72,7 @@ class InferenceNode(Node):
     def _initialize_zed_camera(self) -> None:
         self.zed_camera = sl.Camera()
         init_params = sl.InitParameters()
-        init_params.camera_resolution = sl.RESOLUTION.SVGA
+        init_params.camera_resolution = sl.RESOLUTION.HD720
         init_params.camera_fps = 30
 
         err = self.zed_camera.open(init_params)
@@ -88,15 +88,14 @@ class InferenceNode(Node):
         if self.zed_camera.grab(self.zed_runtime_params) == sl.ERROR_CODE.SUCCESS:
             self.zed_camera.retrieve_image(self.zed_image, sl.VIEW.LEFT)
             image = self.zed_image.get_data()
-            height, width = image.shape[:2]
-            return cv2.resize(image, (width // 2, height // 2))
+            return image
         return None
 
     def preprocess_image(self, image: np.ndarray) -> torch.Tensor:
         bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
 
-        # トリミングせず、そのまま学習時と同じサイズ(640x480)へリサイズ(バイリニア補間)
-        resized_image = cv2.resize(bgr_image, (640, 480), interpolation=cv2.INTER_LINEAR)
+        # 128x72へリサイズ(バイリニア補間)
+        resized_image = cv2.resize(bgr_image, (128, 72), interpolation=cv2.INTER_LINEAR)
 
         # PyTorchのfloat32テンソルに変換し、[0, 1]スケールへ正規化
         image_normalized = resized_image.astype(np.float32) / 255.0
@@ -127,7 +126,7 @@ class InferenceNode(Node):
         if self.debug_mode_:
             # トリミングせずにそのままリサイズして配信
             bgr_image = cv_image[:, :, :3] if cv_image.shape[2] == 4 else cv_image
-            resized_input = cv2.resize(bgr_image, (640, 480))
+            resized_input = cv2.resize(bgr_image, (128, 72))
             debug_msg = self.bridge.cv2_to_imgmsg(resized_input, encoding='bgr8')
             debug_msg.header = header
             self.pub_debug_image.publish(debug_msg)

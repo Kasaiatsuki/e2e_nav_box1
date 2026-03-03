@@ -15,9 +15,9 @@ from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
 from network import Network
 
-# 入力画像の幅と高さ
-IMAGE_WIDTH = 640
-IMAGE_HEIGHT = 480
+# 入力画像の幅と高さ (1280x720の1/10)
+IMAGE_WIDTH = 128
+IMAGE_HEIGHT = 72
 
 class E2EDataset(Dataset):
     """

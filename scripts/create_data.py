@@ -21,8 +21,6 @@ except ImportError:
 
 # サンプリング間隔(秒)
 SAMPLE_INTERVAL = 0.2
-# 一定とする前進速度 (linear.x)
-CONSTANT_LINEAR_X = 0.5 
 
 class DataCollectionNode(Node):
     """
@@ -68,7 +66,7 @@ class DataCollectionNode(Node):
     def _initialize_zed_camera(self) -> None:
         self.zed_camera = sl.Camera()
         init_params = sl.InitParameters()
-        init_params.camera_resolution = sl.RESOLUTION.SVGA
+        init_params.camera_resolution = sl.RESOLUTION.HD720
         init_params.camera_fps = 30
         
         err = self.zed_camera.open(init_params)
@@ -85,8 +83,8 @@ class DataCollectionNode(Node):
             return None
         self.zed_camera.retrieve_image(self.zed_image, sl.VIEW.LEFT)
         image = self.zed_image.get_data()
-        height, width = image.shape[:2]
-        return cv2.resize(image, (width // 2, height // 2))
+        # 1280x720を1/10の128x72にリサイズして保存
+        return cv2.resize(image, (128, 72))
 
     def cmd_vel_callback(self, msg: Twist) -> None:
         """ROSトピック経由で受信した速度指令から角速度を取得"""
@@ -152,8 +150,8 @@ class DataCollectionNode(Node):
             with open(str(csv_path), 'w', newline='') as csvfile:
                 csv_writer = csv.writer(csvfile)
                 # ヘッダーと値を1行分だけ出力
-                csv_writer.writerow(['linear.x', 'angular.z'])
-                csv_writer.writerow([CONSTANT_LINEAR_X, angular_z])
+                csv_writer.writerow(['angular.z'])
+                csv_writer.writerow([angular_z])
 
         self.get_logger().info(f'🔵Saved {len(self.collected_data)} samples to {dataset_dir}')
 

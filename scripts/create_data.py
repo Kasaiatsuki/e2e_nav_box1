@@ -77,8 +77,8 @@ class DataCollectionNode(Node):
             return None
         self.zed_camera.retrieve_image(self.zed_image, sl.VIEW.LEFT)
         image = self.zed_image.get_data()
-        # 1280x720を1/10の128x72にリサイズして保存
-        return cv2.resize(image, (128, 72))
+        # リサイズせずに1280x720の生データをそのまま使用する
+        return image
 
     def cmd_vel_callback(self, msg: Twist) -> None:
         """ROSトピック経由で受信した速度指令から角速度を取得"""

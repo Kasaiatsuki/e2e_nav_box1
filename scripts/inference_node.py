@@ -88,11 +88,8 @@ class InferenceNode(Node):
     def preprocess_image(self, image: np.ndarray) -> torch.Tensor:
         bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
 
-        # 128x72へリサイズ(バイリニア補間)
-        resized_image = cv2.resize(bgr_image, (128, 72), interpolation=cv2.INTER_LINEAR)
-
-        # PyTorchのfloat32テンソルに変換し、[0, 1]スケールへ正規化
-        image_normalized = resized_image.astype(np.float32) / 255.0
+        # 1280x720の生データをそのまま正規化
+        image_normalized = bgr_image.astype(np.float32) / 255.0
 
         # 次元をHWCからCHWに変更し、バッチ次元(unsqueeze)を追加
         tensor = torch.from_numpy(image_normalized).permute(2, 0, 1).unsqueeze(0)
@@ -120,7 +117,7 @@ class InferenceNode(Node):
         if self.debug_mode_:
             # トリミングせずにそのままリサイズして配信
             bgr_image = cv_image[:, :, :3] if cv_image.shape[2] == 4 else cv_image
-            resized_input = cv2.resize(bgr_image, (128, 72))
+            resized_input = bgr_image
             debug_msg = self.bridge.cv2_to_imgmsg(resized_input, encoding='bgr8')
             debug_msg.header = header
             self.pub_debug_image.publish(debug_msg)

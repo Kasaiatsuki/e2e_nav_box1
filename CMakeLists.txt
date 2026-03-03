@@ -27,25 +27,8 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# C++ Executable for Pure Pursuit
-add_executable(pure_pursuit_node src/pure_pursuit_node.cpp)
-target_include_directories(pure_pursuit_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-  ${OpenCV_INCLUDE_DIRS}
-)
-ament_target_dependencies(pure_pursuit_node
-  rclcpp
-  geometry_msgs
-  nav_msgs
-  std_msgs
-  cv_bridge
-)
 
-install(TARGETS
-  pure_pursuit_node
-  DESTINATION lib/${PROJECT_NAME}
-)
+
 install(DIRECTORY include/
   DESTINATION include
 )

@@ -13,16 +13,10 @@ from pathlib import Path
 from typing import Optional, List, Tuple
 from rclpy.qos import qos_profile_sensor_data
 
-try:
-    import pyzed.sl as sl
-    ZED_SDK_AVAILABLE = True
-except ImportError:
-    ZED_SDK_AVAILABLE = False
+import pyzed.sl as sl
 
 # サンプリング間隔(秒)
 SAMPLE_INTERVAL = 0.2
-# 一定とする前進速度 (linear.x)
-CONSTANT_LINEAR_X = 0.5 
 
 class DataCollectionNode(Node):
     """
@@ -51,9 +45,7 @@ class DataCollectionNode(Node):
 
         # ZED SDK用の変数
         self.zed_camera = None
-        if not ZED_SDK_AVAILABLE:
-            self.get_logger().error('ZED SDK not available. Install pyzed package.')
-            raise RuntimeError('ZED SDK not available')
+        # ZED SDKは必須のため、そのまま初期化へ進む
         self._initialize_zed_camera()
 
         # 速度指令(cmd_vel)データのサブスクリプションを追加
@@ -61,15 +53,15 @@ class DataCollectionNode(Node):
 
         # ジョイコントローラ
         self.create_subscription(Joy, '/joy', self.joy_callback, 10)
-        
-        self.create_timer(0.05, self.timer_callback)
+        #  タイマー自体をSAMPLE_INTERVALの周期で回し無駄なカメラアクセスを排除
+        self.create_timer(SAMPLE_INTERVAL, self.timer_callback)
         self.get_logger().info('⚪Create data started (Velocity Mode)')
 
     def _initialize_zed_camera(self) -> None:
         self.zed_camera = sl.Camera()
         init_params = sl.InitParameters()
-        init_params.camera_resolution = sl.RESOLUTION.SVGA
-        init_params.camera_fps = 30
+        init_params.camera_resolution = sl.RESOLUTION.HD720
+        init_params.camera_fps = 15
         
         err = self.zed_camera.open(init_params)
         if err != sl.ERROR_CODE.SUCCESS:
@@ -85,8 +77,8 @@ class DataCollectionNode(Node):
             return None
         self.zed_camera.retrieve_image(self.zed_image, sl.VIEW.LEFT)
         image = self.zed_image.get_data()
-        height, width = image.shape[:2]
-        return cv2.resize(image, (width // 2, height // 2))
+        # リサイズせずに1280x720の生データをそのまま使用する
+        return image
 
     def cmd_vel_callback(self, msg: Twist) -> None:
         """ROSトピック経由で受信した速度指令から角速度を取得"""
@@ -95,36 +87,32 @@ class DataCollectionNode(Node):
     def joy_callback(self, msg: Joy) -> None:
         current_buttons = msg.buttons
         
-        # ボタンの状態変化を検出（押下のエッジ検出）
+        # トグル方式（1回押すと録画開始、もう1回押すと一時停止）
         if len(self.last_joy_buttons) == len(current_buttons):
-            # トグルボタンが押された（OFF -> ON）
+            # ボタンが押し込まれた瞬間（OFF -> ON）だけを検出
             if (len(current_buttons) > self.joy_button_toggle and 
                 current_buttons[self.joy_button_toggle] == 1 and 
                 self.last_joy_buttons[self.joy_button_toggle] == 0):
                 
                 self.is_paused = not self.is_paused
+                
                 if self.is_paused:
-                    self.get_logger().info('⏸️ Data collection paused')
+                    self.get_logger().info('⏸️ Data collection PAUSED (Toggle Off)')
                 else:
-                    self.last_sample_time = None
-                    self.get_logger().info('▶️ Data collection resumed')
-        
+                    self.get_logger().info('▶️ Data collection RECORDING (Toggle On)')
+
         self.last_joy_buttons = list(current_buttons)
 
     def timer_callback(self) -> None:
         if self.is_paused:
             return
 
-        current_time = time.time()
-        
         image = self._capture_data_from_zed()
         if image is None: return
 
-        # サンプリング間隔ごとにデータを保存
-        if self.last_sample_time is None or current_time - self.last_sample_time >= SAMPLE_INTERVAL:
-            self.collected_data.append((image, self.latest_angular_z))
-            self.last_sample_time = current_time
-            self.get_logger().info(f'🟡Collected data #{len(self.collected_data)} (angular_z: {self.latest_angular_z:.2f})')
+        # タイマー自体がSAMPLE_INTERVALの周期なので、時間判定を省略してそのまま保存
+        self.collected_data.append((image, self.latest_angular_z))
+        self.get_logger().info(f'🟡Collected data #{len(self.collected_data)} (angular_z: {self.latest_angular_z:.2f})')
 
     def save_data(self) -> None:
         if len(self.collected_data) == 0:
@@ -151,9 +139,8 @@ class DataCollectionNode(Node):
 
             with open(str(csv_path), 'w', newline='') as csvfile:
                 csv_writer = csv.writer(csvfile)
-                # ヘッダーと値を1行分だけ出力
-                csv_writer.writerow(['linear.x', 'angular.z'])
-                csv_writer.writerow([CONSTANT_LINEAR_X, angular_z])
+                # 値のみを1行分出力
+                csv_writer.writerow([angular_z])
 
         self.get_logger().info(f'🔵Saved {len(self.collected_data)} samples to {dataset_dir}')
 

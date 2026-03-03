@@ -15,9 +15,9 @@ from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
 from network import Network
 
-# 入力画像の幅と高さ
-IMAGE_WIDTH = 640
-IMAGE_HEIGHT = 480
+# 学習の際の画像サイズ（HD720をリサイズなしでそのまま使用）
+IMAGE_WIDTH = 1280
+IMAGE_HEIGHT = 720
 
 class E2EDataset(Dataset):
     """
@@ -49,8 +49,8 @@ class E2EDataset(Dataset):
 
         # CSVファイルから角速度(angular.z)を読み込む
         with open(csv_file, 'r') as f:
-            reader = csv.DictReader(f)
-            angular_z = [float(row['angular.z']) for row in reader]
+            # 中身の数値を直接読み取ってfloat変換
+            angular_z = [float(f.read().strip())]
 
         # 画像のクロップ（トリミング）を廃止し、全体をそのまま指定サイズ(IMAGE_WIDTH x IMAGE_HEIGHT)へリサイズ
         resized_image = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)

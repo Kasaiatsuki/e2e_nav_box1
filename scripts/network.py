@@ -26,8 +26,8 @@ class Network(nn.Module):
         # 全結合層(Fully Connected Layer)の前に2次元のテンソルを1次元に平坦化(Flatten)するための層
         self.flatten = nn.Flatten()
         
-        # 全結合層1: 入力数280896 (640x480画像の場合の平坦化サイズ: 64*57*77)、出力数512
-        self.fc1 = nn.Linear(280896, 512)
+        # 全結合層1: 入力数874176 (1280x720画像の場合の平坦化サイズ: 64*87*157)、出力数512
+        self.fc1 = nn.Linear(874176, 512)
         
         # 全結合層2(出力層): 角速度出力
         self.fc2 = nn.Linear(512, 1)

@@ -53,7 +53,7 @@ class DataCollectionNode(Node):
 
         # ジョイコントローラ
         self.create_subscription(Joy, '/joy', self.joy_callback, 10)
-        # 先輩の指摘を反映: タイマー自体をSAMPLE_INTERVALの周期で回し無駄なカメラアクセスを排除
+        #  タイマー自体をSAMPLE_INTERVALの周期で回し無駄なカメラアクセスを排除
         self.create_timer(SAMPLE_INTERVAL, self.timer_callback)
         self.get_logger().info('⚪Create data started (Velocity Mode)')
 

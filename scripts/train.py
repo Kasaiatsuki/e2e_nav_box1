@@ -15,11 +15,9 @@ from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
 from network import Network
 
-# 入力画像の幅と高さ、および推論対象のウェイポイント数
+# 入力画像の幅と高さ
 IMAGE_WIDTH = 64
 IMAGE_HEIGHT = 48
-NUM_WAYPOINTS = 10
-
 
 class E2EDataset(Dataset):
     """
@@ -40,9 +38,8 @@ class E2EDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        指定されたインデックスのデータ(画像テンソル, ウェイポイントテンソル)を返す。
+        指定されたインデックスのデータ(画像テンソル, 角速度テンソル)を返す。
         画像はバイナリマスク化、クロップ、リサイズを経て1chのテンソルにする。
-        ウェイポイントは指定のスケールで正規化( -1.0 〜 1.0 等)する。
         """
         mask_file = self.mask_files[idx]
         csv_file = self.path_dir / f'{mask_file.stem}.csv'
@@ -50,10 +47,10 @@ class E2EDataset(Dataset):
         # OpenCVを用いて画像(BGR形式)を読み込む
         image_bgr = cv2.imread(str(mask_file), cv2.IMREAD_COLOR)
 
-        # CSVファイルからウェイポイント(x, y)を読み込む
+        # CSVファイルから角速度(angular.z)を読み込む
         with open(csv_file, 'r') as f:
             reader = csv.DictReader(f)
-            waypoints = [[float(row['x']), float(row['y'])] for row in reader]
+            angular_z = [float(row['angular.z']) for row in reader]
 
         # 画像のクロップ（トリミング）を廃止し、全体をそのまま指定サイズ(IMAGE_WIDTH x IMAGE_HEIGHT)へリサイズ
         resized_image = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
@@ -63,19 +60,7 @@ class E2EDataset(Dataset):
         # HWC (Height, Width, Channels) から CHW (Channels, Height, Width) の順に並べ替える
         image_tensor = torch.from_numpy(image_normalized).permute(2, 0, 1)
 
-        # ウェイポイントのリストをテンソルに変換し、1次元に平坦化する
-        waypoints_tensor = torch.tensor(waypoints, dtype=torch.float32).flatten()
-        # x座標(インデックスが偶数)とy座標(インデックスが奇数)をそれぞれ正規化(例: -1.0 〜 1.0)する
-        waypoints_tensor[0::2] = waypoints_tensor[0::2] / 5.0 - 1.0
-        waypoints_tensor[1::2] = (waypoints_tensor[1::2] + 3.0) / 3.0 - 1.0
-        """
-        実際の距離が 0m の時 ⇒ 0 / 5 - 1 = -1.0
-        実際の距離が 5m の時 ⇒ 5 / 5 - 1 = 0.0
-        実際の距離が 10m の時 ⇒ 10 / 5 - 1 = 1.0
-        waypointを0.5m刻みで10個取得しているのなら一番遠いwaypointは5秒後なのでこの正規化だと2m/sまでしか出せない。
-        これは2m/sでデータ収集すればokということ？
-        """
-        return mask_tensor, waypoints_tensor
+        return image_tensor, torch.tensor(angular_z, dtype=torch.float32)
 
 class Config:
     """
@@ -118,11 +103,12 @@ class Trainer:
         self.config = config
         self.device = config.device
 
-        # データセットをロードし、8割を学習用、2割を検証用に分割する
+        # データセットをロードし、学習用のデータをそのまま検証用にも使う
         dataset = E2EDataset(dataset_path)
-        train_size = int(0.8 * len(dataset))
-        val_size = len(dataset) - train_size
-        train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+        train_size =  len(dataset)
+        val_size =  len(dataset)
+        train_dataset = dataset
+        val_dataset = dataset
 
         # 学習用・検証用のDataLoaderを作成(バッチ提供、シャッフル、マルチプロセスなど)
         self.train_loader = DataLoader(
@@ -139,7 +125,7 @@ class Trainer:
         )
 
         # モデルの生成と、指定の計算デバイス(GPU)への転送
-        self.model = Network(num_waypoints=NUM_WAYPOINTS).to(self.device)
+        self.model = Network().to(self.device)
         # オプティマイザ(最適化アルゴリズム)の設定: AdamW
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.learning_rate)
         # 損失関数の定義: 平均二乗誤差(MSE)

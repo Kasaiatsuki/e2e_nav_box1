@@ -6,10 +6,9 @@ import torch.nn as nn
 class Network(nn.Module):
     """
     End-to-Endプランニング用の畳み込みニューラルネットワーク(CNN)モデル。
-    入力として2次元の画像(あるいはそれに準ずるデータ)を受け取り、
-    指定された数のウェイポイント(x, y座標)を出力する。
+
     """
-    def __init__(self, num_waypoints: int = 10):
+    def __init__(self):
         super(Network, self).__init__()
 
         # Conv層1: 入力チャンネル3 (RGB画像)、出力チャンネル32、カーネルサイズ8、ストライド4
@@ -30,8 +29,8 @@ class Network(nn.Module):
         # 全結合層1: 入力数960 (直前の特徴量マップを平坦化したサイズ)、出力数512
         self.fc1 = nn.Linear(960, 512)
         
-        # 全結合層2(出力層): 最終的に出力したいウェイポイント数 × 2 (xとy座標のため)
-        self.fc2 = nn.Linear(512, num_waypoints * 2)
+        # 全結合層2(出力層): 角速度出力
+        self.fc2 = nn.Linear(512, 1)
 
         # 活性化関数: ReLU (Rectified Linear Unit)
         self.relu = nn.ReLU()

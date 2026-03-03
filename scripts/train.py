@@ -16,8 +16,8 @@ from schedulefree import RAdamScheduleFree
 from network import Network
 
 # 入力画像の幅と高さ
-IMAGE_WIDTH = 64
-IMAGE_HEIGHT = 48
+IMAGE_WIDTH = 640
+IMAGE_HEIGHT = 480
 
 class E2EDataset(Dataset):
     """
@@ -25,27 +25,27 @@ class E2EDataset(Dataset):
     画像データ(RGBマスク)とこれに対応するパス(x, y座標)のセットを読み込み、
     学習に適したテンソル形式に変換して提供する。
     """
-    def __init__(self, dataset_path: Path):
-        self.dataset_path = dataset_path
-        self.mask_images_dir = dataset_path / 'mask_images'
-        self.path_dir = dataset_path / 'path'
-        # マスク画像(.png)をソートしてリスト化し、対応するパスデータ(.csv)を取得しやすくする
-        self.mask_files = sorted(list(self.mask_images_dir.glob('*.png')))
+    def __init__(self, dataset_dir):
+        self.dataset_dir = dataset_dir
+        self.images_dir = dataset_dir / 'images'
+        self.angular_vel_dir = dataset_dir / 'angular_vel'
+        # 画像(.png)をソートしてリスト化し、対応する角速度データ(.csv)を取得しやすくする
+        self.image_files = sorted(list(self.images_dir.glob('*.png')))
 
     def __len__(self) -> int:
         """データセットの総サンプル数を返す"""
-        return len(self.mask_files)
+        return len(self.image_files)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         指定されたインデックスのデータ(画像テンソル, 角速度テンソル)を返す。
         画像はバイナリマスク化、クロップ、リサイズを経て1chのテンソルにする。
         """
-        mask_file = self.mask_files[idx]
-        csv_file = self.path_dir / f'{mask_file.stem}.csv'
+        image_file = self.image_files[idx]
+        csv_file = self.angular_vel_dir / f'{image_file.stem}.csv'
 
         # OpenCVを用いて画像(BGR形式)を読み込む
-        image_bgr = cv2.imread(str(mask_file), cv2.IMREAD_COLOR)
+        image_bgr = cv2.imread(str(image_file), cv2.IMREAD_COLOR)
 
         # CSVファイルから角速度(angular.z)を読み込む
         with open(csv_file, 'r') as f:
@@ -66,10 +66,10 @@ class Config:
     """
     学習に関する設定(ハイパーパラメータやパス)をYAMLファイルからロードし管理するクラス。
     """
-    def __init__(self, config_path: Path, package_root: Path):
+    def __init__(self, config_file, package_root):
         self.package_root = package_root
 
-        with open(config_path, 'r') as f:
+        with open(config_file, 'r') as f:
             config_dict = yaml.safe_load(f)
 
         self.epochs = config_dict['epochs']                # エポック数
@@ -99,12 +99,12 @@ class Trainer:
     """
     モデルの学習、検証(Validation)、重みの保存を管理・実行するクラス。
     """
-    def __init__(self, dataset_path: Path, config: Config):
+    def __init__(self, dataset_dir, config):
         self.config = config
         self.device = config.device
 
         # データセットをロードし、学習用のデータをそのまま検証用にも使う
-        dataset = E2EDataset(dataset_path)
+        dataset = E2EDataset(dataset_dir)
         train_size =  len(dataset)
         val_size =  len(dataset)
         train_dataset = dataset
@@ -133,50 +133,9 @@ class Trainer:
         # TensorBoardへログを出力するためのライター
         self.writer = SummaryWriter(log_dir=str(config.logs_dir))
 
-        # 最良の検証ロスを保持しておく変数。初期値は無限大
-        self.best_val_loss = float('inf')
-
         print(f'Using device: {self.device}')
-        print(f'Train size: {len(train_dataset)}, Val size: {len(val_dataset)}')
+        print(f'Train size: {len(train_dataset)}')
 
-    def validate(self) -> float:
-        """
-        検証データセットに対して順伝播を行い、ロスを計算する。
-        学習(パラメータの更新)は行わない。
-        """
-        self.model.eval()
-        total_loss = 0.0
-
-        with torch.no_grad(): # 勾配計算の無効化(メモリ節約、高速化)
-            pbar = tqdm(self.val_loader, desc='Validation')
-            for images, waypoints in pbar:
-                # データをGPUへ転送
-                images = images.to(self.device)
-                waypoints = waypoints.to(self.device)
-
-                # 順伝播で推論を実行し、損失を計算
-                outputs = self.model(images)
-                loss = self.mseloss(outputs, waypoints)
-
-                # バッチのロスを蓄積
-                total_loss += loss.item()
-                pbar.set_postfix({'loss': f'{loss.item():.6f}'})
-
-        # 全バッチの平均ロスを返す
-        return total_loss / len(self.val_loader)
-
-    def save_checkpoint(self, val_loss: float) -> None:
-        """
-        検証ロスが今までで最も良かった場合、モデルの重みを保存(Checkpointing)する。
-        """
-        if val_loss < self.best_val_loss:
-            self.best_val_loss = val_loss
-            weight_path = self.config.weights_dir / self.config.weight_file
-            
-            # TorchScript形式(C++からも読み込み可能)でモデルを直列化(コンパイル)して保存する
-            scripted_model = torch.jit.script(self.model)
-            scripted_model.save(str(weight_path))
-            print(f'Best model saved: {weight_path} (val_loss: {val_loss:.6f})')
 
     def train(self, epochs: int) -> None:
         """
@@ -187,9 +146,9 @@ class Trainer:
             total_train_loss = 0.0
 
             pbar = tqdm(self.train_loader, desc=f'Epoch {epoch} [Train]')
-            for images, waypoints in pbar:
+            for images, targets in pbar:
                 images = images.to(self.device)
-                waypoints = waypoints.to(self.device)
+                targets = targets.to(self.device)
 
                 # 勾配の初期化(これをしないと前回の微分の値が残ってしまう)
                 self.optimizer.zero_grad()
@@ -198,7 +157,7 @@ class Trainer:
                 outputs = self.model(images)
 
                 # 損失の計算と逆伝播(勾配の計算)
-                loss = self.mseloss(outputs, waypoints)
+                loss = self.mseloss(outputs, targets)
                 loss.backward()
                 
                 # オプティマイザによるパラメータ(重み)の更新
@@ -209,38 +168,38 @@ class Trainer:
 
             # 平均の訓練ロスと検証ロスを計算
             train_loss = total_train_loss / len(self.train_loader)
-            val_loss = self.validate()
 
             # TensorBoardに損失をグラフ化するため記録する
             self.writer.add_scalar('Loss/train', train_loss, epoch)
-            self.writer.add_scalar('Loss/val', val_loss, epoch)
 
-            print(f'Epoch [{epoch}/{epochs}], Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}')
+            print(f'Epoch [{epoch}/{epochs}], Train Loss: {train_loss:.6f}')
 
-            # より良いモデルであれば重みファイルを更新
-            self.save_checkpoint(val_loss)
-
+        # ループ(for)を抜け、全エポックの学習が完全に終わった後に1回だけモデルを保存する
+        weight_file_dest = self.config.weights_dir / self.config.weight_file
+        scripted_model = torch.jit.script(self.model)
+        scripted_model.save(str(weight_file_dest))
+        print(f'Model saved to: {weight_file_dest}')
+        
         self.writer.close()
-
 def main() -> None:
     """コマンドラインから実行させる際のメインエントリポイント"""
     if len(sys.argv) != 2:
-        print('Usage: python3 train.py <dataset_path>')
+        print('Usage: python3 train.py <dataset_dir>')
         sys.exit(1)
 
-    dataset_path = Path(sys.argv[1])
-    if not dataset_path.exists():
-        print(f'Dataset path does not exist: {dataset_path}')
+    dataset_dir = Path(sys.argv[1])
+    if not dataset_dir.exists():
+        print(f'Dataset dir does not exist: {dataset_dir}')
         sys.exit(1)
 
     # config.yaml(train.yaml)のパスを相対的に取得
     script_dir = Path(__file__).parent
     package_root = script_dir.parent
-    config_path = package_root / 'config' / 'train.yaml'
+    config_file = package_root / 'config' / 'train.yaml'
 
     # 設定のロードとTrainerの初期化
-    config = Config(config_path, package_root)
-    trainer = Trainer(dataset_path, config)
+    config = Config(config_file, package_root)
+    trainer = Trainer(dataset_dir, config)
 
     print(f'Starting training for {config.epochs} epochs')
     trainer.train(config.epochs)
@@ -249,3 +208,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+

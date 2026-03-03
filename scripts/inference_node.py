@@ -17,11 +17,7 @@ from rclpy.qos import qos_profile_system_default, qos_profile_sensor_data
 from ament_index_python.packages import get_package_share_directory
 from typing import Optional
 
-try:
-    import pyzed.sl as sl
-    ZED_SDK_AVAILABLE = True
-except ImportError:
-    ZED_SDK_AVAILABLE = False
+import pyzed.sl as sl
 
 # 一定とする前進速度 (linear.x)
 CONSTANT_LINEAR_X = 0.5 
@@ -55,9 +51,7 @@ class InferenceNode(Node):
             self.get_logger().warn(f'Model file not found: {weight_path}')
             self.model = None
 
-        if not ZED_SDK_AVAILABLE:
-            self.get_logger().error('ZED SDK not available. Install pyzed package.')
-            raise RuntimeError('ZED SDK not available')
+        # ZED SDKは必須のため、そのまま初期化へ進む
         self._initialize_zed_camera()
 
         # 推論した速度をパブリッシュする先

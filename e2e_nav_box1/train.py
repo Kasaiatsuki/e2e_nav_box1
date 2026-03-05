@@ -13,7 +13,7 @@ import numpy as np
 from typing import Tuple
 from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
-from network import Network
+from e2e_nav_box1.network import Network
 
 # 学習の際の画像サイズ（HD720を半分にリサイズした640x360を想定）
 IMAGE_WIDTH = 640

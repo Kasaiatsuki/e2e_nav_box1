@@ -2,6 +2,7 @@
 
 import sys
 import yaml
+import random
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -15,9 +16,14 @@ from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
 from e2e_nav_box1.network import Network
 
-# 学習の際の画像サイズ（HD720を半分にリサイズした640x360を想定）
+# 学習・推論の際の画像サイズ（HD720: 1280x720 からクロップして作成）
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 360
+
+# 水平シフトクロップ拡張のパラメータ
+# 0.0を2つ入れることで中央クロップ（拡張なし）の確率を上げる
+SHIFT_SIGNS = [-2.0, -1.0, 0.0, 0.0, 1.0, 2.0]
+SHIFT_VEL_OFFSET = 0.15  # 1段階あたりの角速度補正量 [rad/s]
 
 class E2EDataset(Dataset):
     """
@@ -54,18 +60,36 @@ class E2EDataset(Dataset):
 
         # CSVファイルから角速度(angular.z)を読み込む
         with open(csv_file, 'r') as f:
-            # 中身の数値を直接読み取ってfloat変換
-            angular_z = [float(f.read().strip())]
+            angular_z = float(f.read().strip())
 
-        # 画像のクロップ（トリミング）を廃止し、全体をそのまま指定サイズ(IMAGE_WIDTH x IMAGE_HEIGHT)へリサイズ
-        resized_image = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
+        # --- 水平シフトクロップ拡張 ---
+        # 縦方向: 720→IMAGE_HEIGHT(360)にリサイズ（画素を全て保持）
+        # 横方向: 1280のまま保持し、シフトクロップのみ適用
+        h, w = image_bgr.shape[:2]
+        shift_sign = random.choice(SHIFT_SIGNS)
 
-        # PyTorchで扱えるようにfloat32へ変換し、[0, 255]の値を[0, 1]に正規化
-        image_normalized = resized_image.astype(np.float32) / 255.0
-        # HWC (Height, Width, Channels) から CHW (Channels, Height, Width) の順に並べ替える
+        if w >= IMAGE_WIDTH:
+            # Step1: 縦方向のみリサイズ (1280x720 → 1280x360)
+            height_resized = cv2.resize(image_bgr, (w, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
+            # Step2: 横方向をシフトして640幅でクロップ (1280x360 → 640x360)
+            max_x_shift = w - IMAGE_WIDTH
+            center_x = max_x_shift // 2
+            x_offset = int((shift_sign / 2.0) * center_x)
+            x_start = max(0, min(center_x + x_offset, max_x_shift))
+            cropped = height_resized[:, x_start:x_start + IMAGE_WIDTH]
+        else:
+            # 元画像がターゲットより小さい場合はリサイズのみ
+            cropped = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
+            shift_sign = 0.0
+
+        # ずれた量に比例して角速度を補正（右にずれた画像→左に戻る指令を追加）
+        adjusted_angular_z = angular_z + shift_sign * SHIFT_VEL_OFFSET
+
+        # PyTorchで扱えるようにfloat32へ変換し、[0, 1]に正規化
+        image_normalized = cropped.astype(np.float32) / 255.0
         image_tensor = torch.from_numpy(image_normalized).permute(2, 0, 1)
 
-        return image_tensor, torch.tensor(angular_z, dtype=torch.float32)
+        return image_tensor, torch.tensor([adjusted_angular_z], dtype=torch.float32)
 
 class Config:
     """

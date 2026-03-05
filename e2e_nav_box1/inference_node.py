@@ -57,6 +57,7 @@ class InferenceNode(Node):
 
         # 推論した速度をパブリッシュする先
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.last_angular_z = 0.0  # 前回の推論結果（カメラ失敗時に再利用）
 
         if self.debug_mode_:
             self.pub_debug_image = self.create_publisher(Image, 'e2e_planner/debug_image', qos_profile_system_default)
@@ -106,6 +107,11 @@ class InferenceNode(Node):
         # --- 1. 画像の取得 ---
         cv_image = self._capture_image_from_zed()
         if cv_image is None:
+            # カメラグラブ失敗時も前回の角速度で publish し続け、ypspur のタイムアウトを防ぐ
+            twist_msg = Twist()
+            twist_msg.linear.x = CONSTANT_LINEAR_X
+            twist_msg.angular.z = self.last_angular_z
+            self.cmd_vel_pub.publish(twist_msg)
             return
             
         from std_msgs.msg import Header
@@ -133,6 +139,7 @@ class InferenceNode(Node):
         # モデルの出力は [1, 1] (バッチサイズ1, 出力次元1) になっている前提
         # 出力された角速度を取得
         angular_z = float(output[0, 0].item())
+        self.last_angular_z = angular_z  # 次回のカメラ失敗時のために保存
 
         # --- 4. Twistメッセージ(cmd_vel)の発行 ---
         twist_msg = Twist()

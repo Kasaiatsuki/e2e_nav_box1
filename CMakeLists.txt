@@ -32,7 +32,7 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-install(DIRECTORY config/
+install(DIRECTORY config weights
   DESTINATION share/${PROJECT_NAME}
 )
 

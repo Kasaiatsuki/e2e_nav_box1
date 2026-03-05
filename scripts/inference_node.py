@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 inference_node.py
 役割: 学習済みのニューラルネットワークモデル(Behavioral Cloning)を利用して、カメラ画像からリアルタイムに角速度(angular.z)を推論し、ROS 2のTwistメッセージとして配信('/cmd_vel')するノードです。
@@ -26,7 +27,7 @@ class InferenceNode(Node):
     def __init__(self) -> None:
         super().__init__('inference_node')
 
-        self.declare_parameter('model_name', 'model.pt')
+        self.declare_parameter('model_name', 'e2e_model.pt')
         self.declare_parameter('interval_ms', 100)
         self.declare_parameter('debug_mode', True)
 
@@ -88,8 +89,11 @@ class InferenceNode(Node):
     def preprocess_image(self, image: np.ndarray) -> torch.Tensor:
         bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
 
-        # 1280x720の生データをそのまま正規化
-        image_normalized = bgr_image.astype(np.float32) / 255.0
+        # HD720(1280x720)の入力画像を、学習時と同じ解像度(640x360)にリサイズ
+        resized_image = cv2.resize(bgr_image, (640, 360), interpolation=cv2.INTER_LINEAR)
+
+        # 640x360の生データを正規化
+        image_normalized = resized_image.astype(np.float32) / 255.0
 
         # 次元をHWCからCHWに変更し、バッチ次元(unsqueeze)を追加
         tensor = torch.from_numpy(image_normalized).permute(2, 0, 1).unsqueeze(0)

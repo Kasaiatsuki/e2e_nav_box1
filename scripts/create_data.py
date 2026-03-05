@@ -77,7 +77,7 @@ class DataCollectionNode(Node):
             return None
         self.zed_camera.retrieve_image(self.zed_image, sl.VIEW.LEFT)
         image = self.zed_image.get_data()
-        # リサイズせずに1280x720の生データをそのまま使用する
+        # 生画像(960x600等のSVGA)をそのまま返し、保存や推論の直前でリサイズする
         return image
 
     def cmd_vel_callback(self, msg: Twist) -> None:
@@ -110,8 +110,11 @@ class DataCollectionNode(Node):
         image = self._capture_data_from_zed()
         if image is None: return
 
+        # HD720(1280x720) の画像を半分の 640x360 にリサイズ
+        image_resized = cv2.resize(image, (640, 360), interpolation=cv2.INTER_LINEAR)
+
         # タイマー自体がSAMPLE_INTERVALの周期なので、時間判定を省略してそのまま保存
-        self.collected_data.append((image, self.latest_angular_z))
+        self.collected_data.append((image_resized, self.latest_angular_z))
         self.get_logger().info(f'🟡Collected data #{len(self.collected_data)} (angular_z: {self.latest_angular_z:.2f})')
 
     def save_data(self) -> None:

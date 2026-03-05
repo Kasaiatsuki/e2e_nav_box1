@@ -15,9 +15,9 @@ from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
 from network import Network
 
-# 学習の際の画像サイズ（HD720をリサイズなしでそのまま使用）
-IMAGE_WIDTH = 1280
-IMAGE_HEIGHT = 720
+# 学習の際の画像サイズ（HD720を半分にリサイズした640x360を想定）
+IMAGE_WIDTH = 640
+IMAGE_HEIGHT = 360
 
 class E2EDataset(Dataset):
     """
@@ -29,8 +29,13 @@ class E2EDataset(Dataset):
         self.dataset_dir = dataset_dir
         self.images_dir = dataset_dir / 'images'
         self.angular_vel_dir = dataset_dir / 'angular_vel'
-        # 画像(.png)をソートしてリスト化し、対応する角速度データ(.csv)を取得しやすくする
-        self.image_files = sorted(list(self.images_dir.glob('*.png')))
+        # 画像(.png)と対応する録画データ(.csv)が両方揃っているものだけをリスト化する
+        all_images = sorted(list(self.images_dir.glob('*.png')))
+        self.image_files = []
+        for img_path in all_images:
+            csv_file = self.angular_vel_dir / f'{img_path.stem}.csv'
+            if csv_file.exists():
+                self.image_files.append(img_path)
 
     def __len__(self) -> int:
         """データセットの総サンプル数を返す"""
@@ -193,7 +198,7 @@ def main() -> None:
         sys.exit(1)
 
     # config.yaml(train.yaml)のパスを相対的に取得
-    script_dir = Path(__file__).parent
+    script_dir = Path(__file__).resolve().parent
     package_root = script_dir.parent
     config_file = package_root / 'config' / 'train.yaml'
 

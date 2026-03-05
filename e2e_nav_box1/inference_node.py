@@ -7,6 +7,7 @@ inference_node.py
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
+from std_msgs.msg import Empty
 from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 import cv2
@@ -30,10 +31,12 @@ class InferenceNode(Node):
         self.declare_parameter('model_name', 'e2e_model.pt')
         self.declare_parameter('interval_ms', 100)
         self.declare_parameter('debug_mode', True)
+        self.declare_parameter('wait_for_flag', True)
 
         model_path = self.get_parameter('model_name').value
         interval_ms = self.get_parameter('interval_ms').value
         self.debug_mode_ = self.get_parameter('debug_mode').value
+        wait_for_flag = self.get_parameter('wait_for_flag').value
 
         self.bridge = CvBridge()
         self.device = torch.device('cuda')
@@ -64,6 +67,22 @@ class InferenceNode(Node):
             self.get_logger().info('Debug mode enabled: publishing preprocessed images to e2e_planner/debug_image')
 
         self.timer = self.create_timer(interval_ms / 1000.0, self.timer_callback)
+
+        # flagトピックを購読。wait_for_flag=True のときは起動直後にタイマーを停止して待機する
+        self.create_subscription(Empty, 'flag', self._flag_callback, 10)
+        if wait_for_flag:
+            self.timer.cancel()
+            self.get_logger().info('flagモード: "flag" トピック受信まで推論を待機中...')
+        else:
+            self.get_logger().info('通常モード: 推論を即時開始')
+
+    def _flag_callback(self, _msg: Empty) -> None:
+        """flagトピック受信時に推論タイマーを（再）起動する"""
+        if not self.timer.is_ready() or self.timer.is_canceled():
+            self.timer.reset()
+            self.get_logger().info('フラグ受信: 推論開始')
+        else:
+            self.get_logger().info('フラグ受信: 推論はすでに動作中')
 
     def _initialize_zed_camera(self) -> None:
         self.zed_camera = sl.Camera()

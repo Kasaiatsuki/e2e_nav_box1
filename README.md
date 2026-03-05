@@ -41,7 +41,7 @@ pip3 install torch torchvision opencv-python schedulefree
 
 ### 1. ワークスペースへのクローン
 ```bash
-cd ~/kasai_ws/src
+cd ~/my_ws/src
 git clone <repository_url> e2e_nav_box1
 ```
 
@@ -52,7 +52,7 @@ pip3 install torch torchvision opencv-python schedulefree
 
 ### 3. パッケージのビルド
 ```bash
-cd ~/kasai_ws
+cd ~/my_ws
 colcon build --packages-select e2e_nav_box1
 source install/setup.bash
 ```
@@ -86,7 +86,7 @@ ros2 run e2e_nav_box1 create_data
 
 収集されたデータは以下に保存されます：
 ```
-~/kasai_ws/install/e2e_nav_box1/lib/python3.8/site-packages/data/<タイムスタンプ>_dataset/
+~/my_ws/install/e2e_nav_box1/lib/python3.8/site-packages/data/<タイムスタンプ>_dataset/
 ├── images/     # 640x360 にリサイズ済み PNG 画像
 └── angular_vel/ # 対応する角速度 CSV
 ```
@@ -94,14 +94,14 @@ ros2 run e2e_nav_box1 create_data
 ### Step 3: モデルの学習
 
 ```bash
-cd ~/kasai_ws/src/e2e_nav_box1/e2e_nav_box1
+cd ~/my_ws/src/e2e_nav_box1/e2e_nav_box1
 python3 train.py ~/kasai_ws/install/e2e_nav_box1/lib/python3.8/site-packages/data/<タイムスタンプ>_dataset
 ```
 
-- 学習完了後、モデルは `~/kasai_ws/src/e2e_nav_box1/weights/e2e_model.pt` に保存されます
+- 学習完了後、モデルは `~/my_ws/src/e2e_nav_box1/weights/e2e_model.pt` に保存されます
 - 学習後は必ずビルドして `install` に反映させてください：
   ```bash
-  cd ~/kasai_ws && colcon build --packages-select e2e_nav_box1
+  cd ~/my_ws && colcon build --packages-select e2e_nav_box1
   ```
 
 ### Step 4: 自律走行（推論）

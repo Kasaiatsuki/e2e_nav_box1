@@ -22,7 +22,7 @@ from typing import Optional
 import pyzed.sl as sl
 
 # 一定とする前進速度 (linear.x)
-CONSTANT_LINEAR_X = 0.5 
+CONSTANT_LINEAR_X = 0.8
 
 class InferenceNode(Node):
     def __init__(self) -> None:

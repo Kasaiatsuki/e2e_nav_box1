@@ -14,6 +14,7 @@ import numpy as np
 from typing import Tuple
 from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
+from torchvision import transforms
 from e2e_nav_box1.network import Network
 
 # 学習・推論の際の画像サイズ（HD720: 1280x720 からクロップして作成）
@@ -89,6 +90,13 @@ class E2EDataset(Dataset):
             )
             # 右シフト(shift_px>0) → 廊下左寄り → 右に戻る(angular_z 減少)
             adjusted_angular_z -= shift_px * SHIFT_VEL_PER_PIXEL
+
+        # Step4: 環境光（明るさ・コントラスト）のランダム変動
+        if random.random() < 0.90:  # 90%の確率で適用
+            # 1. コントラスト (alpha: 0.5 ~ 3.0) と 明るさ (beta: -30 ~ 80) を変動させる
+            alpha = random.uniform(0.5, 3.0)
+            beta = random.randint(-30, 80)
+            cropped = cv2.convertScaleAbs(cropped, alpha=alpha, beta=beta)
 
         # PyTorchで扱えるようにfloat32へ変換し、[0, 1]に正規化
         image_normalized = cropped.astype(np.float32) / 255.0

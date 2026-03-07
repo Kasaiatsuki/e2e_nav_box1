@@ -110,7 +110,8 @@ class DataCollectionNode(Node):
         image = self._capture_data_from_zed()
         if image is None: return
 
-        # HD720(1280x720) の画像を半分の 640x360 にリサイズ
+        # HD720(1280x720) の画像を 640×360 にリサイズして保存
+        # 平行移動シフトは 640px 画像に対して行うため 1280 幅は不要
         image_resized = cv2.resize(image, (640, 360), interpolation=cv2.INTER_LINEAR)
 
         # タイマー自体がSAMPLE_INTERVALの周期なので、時間判定を省略してそのまま保存

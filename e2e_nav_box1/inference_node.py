@@ -108,16 +108,14 @@ class InferenceNode(Node):
 
     def preprocess_image(self, image: np.ndarray) -> torch.Tensor:
         bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
-        h, w = bgr_image.shape[:2]
 
-        # Step1: 縦方向のみ720→360にリサイズ（横幅は1280のまま）
-        height_resized = cv2.resize(bgr_image, (w, 360), interpolation=cv2.INTER_LINEAR)
-        # Step2: 中央640pxを切り出す（学習時のshift_sign=0と同じ全身結果）
-        x_start = (w - 640) // 2
-        cropped = height_resized[:, x_start:x_start + 640]
+        # 学習パイプライン(shift_px=0)と同じ変換:
+        # 1280×720 全体を 640×360 にリサイズ（全幅視野を保持）
+        # → 曲がり角の壁・通路も視野内に入る
+        resized = cv2.resize(bgr_image, (640, 360), interpolation=cv2.INTER_LINEAR)
 
         # 正規化してPyTorchテンソルに変換
-        image_normalized = cropped.astype(np.float32) / 255.0
+        image_normalized = resized.astype(np.float32) / 255.0
         tensor = torch.from_numpy(image_normalized).permute(2, 0, 1).unsqueeze(0)
         return tensor.to(self.device)
 

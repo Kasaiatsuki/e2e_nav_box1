@@ -20,10 +20,11 @@ from e2e_nav_box1.network import Network
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 360
 
-# 水平シフトクロップ拡張のパラメータ
-# 0.0を2つ入れることで中央クロップ（拡張なし）の確率を上げる
-SHIFT_SIGNS = [-2.0, -1.0, 0.0, 0.0, 1.0, 2.0]
-SHIFT_VEL_OFFSET = 0.15  # 1段階あたりの角速度補正量 [rad/s]
+# 水平平行移動シフト拡張のパラメータ
+# ピクセル単位でシフト量を指定し、推論（shift=0）と一貫した変換を使う
+# 0を2つ入れることで中央（拡張なし）の確率を上げる
+SHIFT_PIXELS = [-60, -30, 0, 0, 30, 60]  # 正: 右シフト（廊下左寄り視点）
+SHIFT_VEL_PER_PIXEL = 0.15 / 30.0        # 30pxあたり0.15 rad/sの補正
 
 class E2EDataset(Dataset):
     """
@@ -62,28 +63,32 @@ class E2EDataset(Dataset):
         with open(csv_file, 'r') as f:
             angular_z = float(f.read().strip())
 
-        # --- 水平シフトクロップ拡張 ---
-        # 縦方向: 720→IMAGE_HEIGHT(360)にリサイズ（画素を全て保持）
-        # 横方向: 1280のまま保持し、シフトクロップのみ適用
-        h, w = image_bgr.shape[:2]
-        shift_sign = random.choice(SHIFT_SIGNS)
+        # --- データ拡張パイプライン ---
 
-        if w >= IMAGE_WIDTH:
-            # Step1: 縦方向のみリサイズ (1280x720 → 1280x360)
-            height_resized = cv2.resize(image_bgr, (w, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
-            # Step2: 横方向をシフトして640幅でクロップ (1280x360 → 640x360)
-            max_x_shift = w - IMAGE_WIDTH
-            center_x = max_x_shift // 2
-            x_offset = int((shift_sign / 2.0) * center_x)
-            x_start = max(0, min(center_x + x_offset, max_x_shift))
-            cropped = height_resized[:, x_start:x_start + IMAGE_WIDTH]
-        else:
-            # 元画像がターゲットより小さい場合はリサイズのみ
-            cropped = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
-            shift_sign = 0.0
+        # Step1: 全体を640×360にリサイズ（全幅視野を保持。曲がり角も見える）
+        cropped = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
+        adjusted_angular_z = angular_z
 
-        # ずれた量に比例して角速度を補正（右にずれた画像→左に戻る指令を追加）
-        adjusted_angular_z = angular_z + shift_sign * SHIFT_VEL_OFFSET
+        # Step2: 左右反転（インデックスが奇数のサンプルを反転）
+        # 偶数idx→そのまま, 奇数idx→反転 で確実に1:1の比率になり
+        # 左回りコースのデータのみでも angular_z バイアスを打ち消す
+        if idx % 2 == 1:
+            cropped = cv2.flip(cropped, 1)
+            adjusted_angular_z = -adjusted_angular_z
+
+        # Step3: 水平平行移動シフト
+        # 「廊下内でロボットが中心からずれた視点」を擬似的に作成し、
+        # ずれに比例した修正angular_zを付与する。
+        # 推論時はシフトなし(shift_px=0)のまま → 学習・推論の変換が一致。
+        shift_px = random.choice(SHIFT_PIXELS)
+        if shift_px != 0:
+            M = np.float32([[1, 0, shift_px], [0, 1, 0]])
+            cropped = cv2.warpAffine(
+                cropped, M, (IMAGE_WIDTH, IMAGE_HEIGHT),
+                borderMode=cv2.BORDER_REPLICATE
+            )
+            # 右シフト(shift_px>0) → 廊下左寄り → 右に戻る(angular_z 減少)
+            adjusted_angular_z -= shift_px * SHIFT_VEL_PER_PIXEL
 
         # PyTorchで扱えるようにfloat32へ変換し、[0, 1]に正規化
         image_normalized = cropped.astype(np.float32) / 255.0

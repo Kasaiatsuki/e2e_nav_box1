@@ -14,6 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         # config や weights フォルダもインストール先へコピーするための設定
         (os.path.join('share', package_name, 'config'), glob('config/*')),
+        (os.path.join('share', package_name, 'launch'), glob('launch/*')),
         (os.path.join('share', package_name, 'weights'), glob('weights/*')),
     ],
     install_requires=['setuptools'],

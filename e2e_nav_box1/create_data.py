@@ -2,7 +2,8 @@
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image, Joy
+from sensor_msgs.msg import Image
+from std_msgs.msg import Empty
 from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 import cv2
@@ -12,8 +13,7 @@ import csv
 from pathlib import Path
 from typing import Optional, List, Tuple
 from rclpy.qos import qos_profile_sensor_data
-
-import pyzed.sl as sl
+from e2e_nav_box1.zed_capture import ZedCameraWrapper
 
 # サンプリング間隔(秒)
 SAMPLE_INTERVAL = 0.2
@@ -26,100 +26,56 @@ class DataCollectionNode(Node):
     def __init__(self) -> None:
         super().__init__('data_collection_node')
 
-        self.declare_parameter('joy_button_toggle', 1)
-        self.joy_button_toggle = self.get_parameter('joy_button_toggle').value
-
         self.bridge = CvBridge()
         
         # 最新のデータを保持する変数
-        self.latest_image: Optional[Image] = None
         self.latest_angular_z: float = 0.0
 
         # 完成したデータ(画像, angular.z)のリスト
         self.collected_data: List[Tuple[np.ndarray, float]] = []
-        self.last_sample_time: Optional[float] = None
 
         # データ収集のオン/オフ状態管理
         self.is_paused: bool = True
-        self.last_joy_buttons: List[int] = []
 
         # ZED SDK用の変数
-        self.zed_camera = None
-        # ZED SDKは必須のため、そのまま初期化へ進む
-        self._initialize_zed_camera()
+        self.zed_camera = ZedCameraWrapper(fps=15)
+        
+        try:
+            self.zed_camera.open()
+            self.get_logger().info('ZED camera initialized (SDK mode)')
+        except RuntimeError as e:
+            self.get_logger().error(str(e))
+            raise e
 
         # 速度指令(cmd_vel)データのサブスクリプションを追加
         self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
 
         # ジョイコントローラ
-        self.create_subscription(Joy, '/joy', self.joy_callback, 10)
+        self.create_subscription(Empty, 'flag', self._flag_callback, 10)
         #  タイマー自体をSAMPLE_INTERVALの周期で回し無駄なカメラアクセスを排除
         self.create_timer(SAMPLE_INTERVAL, self.timer_callback)
         self.get_logger().info('⚪Create data started (Velocity Mode)')
-
-    def _initialize_zed_camera(self) -> None:
-        self.zed_camera = sl.Camera()
-        init_params = sl.InitParameters()
-        init_params.camera_resolution = sl.RESOLUTION.HD720
-        init_params.camera_fps = 15
-        
-        err = self.zed_camera.open(init_params)
-        if err != sl.ERROR_CODE.SUCCESS:
-            self.get_logger().error(f'Failed to open ZED camera: {err}')
-            raise RuntimeError(f'Failed to open ZED camera: {err}')
-
-        self.zed_image = sl.Mat()
-        self.zed_runtime_params = sl.RuntimeParameters()
-        self.get_logger().info('ZED camera initialized (SDK mode)')
-
-    def _capture_data_from_zed(self) -> Optional[np.ndarray]:
-        if self.zed_camera.grab(self.zed_runtime_params) != sl.ERROR_CODE.SUCCESS:
-            return None
-        self.zed_camera.retrieve_image(self.zed_image, sl.VIEW.LEFT)
-        image = self.zed_image.get_data()
-        # 生画像(960x600等のSVGA)をそのまま返し、保存や推論の直前でリサイズする
-        return image
+        # ZED API implementation was moved to ZedCameraWrapper
 
     def cmd_vel_callback(self, msg: Twist) -> None:
         """ROSトピック経由で受信した速度指令から角速度を取得"""
         self.latest_angular_z = msg.angular.z
 
-    def joy_callback(self, msg: Joy) -> None:
-        current_buttons = msg.buttons
+    def _flag_callback(self, _msg: Empty) -> None:
+        """/flagトピック受信時に録画をトグル(開始/停止)する"""
+        self.is_paused = not self.is_paused
         
-        # トグル方式（1回押すと録画開始、もう1回押すと一時停止）
-        if len(self.last_joy_buttons) == len(current_buttons):
-            # ボタンが押し込まれた瞬間（OFF -> ON）だけを検出
-            if (len(current_buttons) > self.joy_button_toggle and 
-                current_buttons[self.joy_button_toggle] == 1 and 
-                self.last_joy_buttons[self.joy_button_toggle] == 0):
-                
-                self.is_paused = not self.is_paused
-                
-                if self.is_paused:
-                    self.get_logger().info('⏸️ Data collection PAUSED (Toggle Off)')
-                else:
-                    self.get_logger().info('▶️ Data collection RECORDING (Toggle On)')
-
-        self.last_joy_buttons = list(current_buttons)
+        if self.is_paused:
+            self.get_logger().info('⏸️ Data collection PAUSED')
+        else:
+            self.get_logger().info('▶️ Data collection RECORDING')
 
     def timer_callback(self) -> None:
         if self.is_paused:
             return
 
-        image = self._capture_data_from_zed()
-        if image is None: return
-
-        # ZED SDKから取得した画像は4チャンネル(RGBA)で、メモリのパディング(stride)が含まれる場合がある。
-        # そのままリサイズすると斜めに歪むことがあるため、まず3チャンネル(BGR)に変換して連続メモリにする。
-        bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
-
-        # HD720(1280x720) の画像を 640×360 にリサイズして保存
-        # 平行移動シフトは 640px 画像に対して行うため 1280 幅は不要
-        image_resized = cv2.resize(bgr_image, (640, 360), interpolation=cv2.INTER_LINEAR)
-
         # タイマー自体がSAMPLE_INTERVALの周期なので、時間判定を省略してそのまま保存
-        self.collected_data.append((image_resized, self.latest_angular_z))
+        self.collected_data.append((image, self.latest_angular_z))
         self.get_logger().info(f'🟡Collected data #{len(self.collected_data)} (angular_z: {self.latest_angular_z:.2f})')
 
     def save_data(self) -> None:
@@ -161,6 +117,8 @@ def main(args=None) -> None:
         node.get_logger().info('Interrupted by user')
     finally:
         node.save_data()
+        if hasattr(node, 'zed_camera') and node.zed_camera:
+            node.zed_camera.close()
         node.destroy_node()
         rclpy.shutdown()
 

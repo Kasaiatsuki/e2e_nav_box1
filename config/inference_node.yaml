@@ -1,0 +1,7 @@
+inference_node:
+  ros__parameters:
+    model_name: "e2e_model.pt"
+    interval_ms: 100
+    debug_mode: true
+    wait_for_flag: true
+    linear_x: 0.5

@@ -74,6 +74,12 @@ class DataCollectionNode(Node):
         if self.is_paused:
             return
 
+        # ZEDカメラから画像を取得
+        image = self.zed_camera.grab_image()
+        if image is None:
+            self.get_logger().warning('Failed to grab image from ZED camera')
+            return
+
         # タイマー自体がSAMPLE_INTERVALの周期なので、時間判定を省略してそのまま保存
         self.collected_data.append((image, self.latest_angular_z))
         self.get_logger().info(f'🟡Collected data #{len(self.collected_data)} (angular_z: {self.latest_angular_z:.2f})')

@@ -109,13 +109,13 @@ class InferenceNode(Node):
     def preprocess_image(self, image: np.ndarray) -> torch.Tensor:
         bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
 
-        # HD720(1280x720)の入力画像を、学習時と同じ解像度(640x360)にリサイズ
-        resized_image = cv2.resize(bgr_image, (640, 360), interpolation=cv2.INTER_LINEAR)
+        # 学習パイプライン(shift_px=0)と同じ変換:
+        # 1280×720 全体を 640×360 にリサイズ（全幅視野を保持）
+        # → 曲がり角の壁・通路も視野内に入る
+        resized = cv2.resize(bgr_image, (640, 360), interpolation=cv2.INTER_LINEAR)
 
-        # 640x360の生データを正規化
-        image_normalized = resized_image.astype(np.float32) / 255.0
-
-        # 次元をHWCからCHWに変更し、バッチ次元(unsqueeze)を追加
+        # 正規化してPyTorchテンソルに変換
+        image_normalized = resized.astype(np.float32) / 255.0
         tensor = torch.from_numpy(image_normalized).permute(2, 0, 1).unsqueeze(0)
         return tensor.to(self.device)
 

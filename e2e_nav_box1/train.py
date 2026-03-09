@@ -2,6 +2,7 @@
 
 import sys
 import yaml
+import random
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -15,9 +16,15 @@ from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
 from e2e_nav_box1.network import Network
 
-# 学習の際の画像サイズ（HD720を半分にリサイズした640x360を想定）
+# 学習・推論の際の画像サイズ（HD720: 1280x720 からクロップして作成）
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 360
+
+# 水平平行移動シフト拡張のパラメータ
+# ピクセル単位でシフト量を指定し、推論（shift=0）と一貫した変換を使う
+# 0を2つ入れることで中央（拡張なし）の確率を上げる
+SHIFT_PIXELS = [-60, -30, 0, 0, 30, 60]  # 正: 右シフト（廊下左寄り視点）
+SHIFT_VEL_PER_PIXEL = 0.15 / 30.0        # 30pxあたり0.15 rad/sの補正
 
 class E2EDataset(Dataset):
     """
@@ -54,18 +61,40 @@ class E2EDataset(Dataset):
 
         # CSVファイルから角速度(angular.z)を読み込む
         with open(csv_file, 'r') as f:
-            # 中身の数値を直接読み取ってfloat変換
-            angular_z = [float(f.read().strip())]
+            angular_z = float(f.read().strip())
 
-        # 画像のクロップ（トリミング）を廃止し、全体をそのまま指定サイズ(IMAGE_WIDTH x IMAGE_HEIGHT)へリサイズ
-        resized_image = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
+        # --- データ拡張パイプライン ---
 
-        # PyTorchで扱えるようにfloat32へ変換し、[0, 255]の値を[0, 1]に正規化
-        image_normalized = resized_image.astype(np.float32) / 255.0
-        # HWC (Height, Width, Channels) から CHW (Channels, Height, Width) の順に並べ替える
+        # Step1: 全体を640×360にリサイズ（全幅視野を保持。曲がり角も見える）
+        cropped = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
+        adjusted_angular_z = angular_z
+
+        # Step2: 左右反転（インデックスが奇数のサンプルを反転）
+        # 偶数idx→そのまま, 奇数idx→反転 で確実に1:1の比率になり
+        # 左回りコースのデータのみでも angular_z バイアスを打ち消す
+        if idx % 2 == 1:
+            cropped = cv2.flip(cropped, 1)
+            adjusted_angular_z = -adjusted_angular_z
+
+        # Step3: 水平平行移動シフト
+        # 「廊下内でロボットが中心からずれた視点」を擬似的に作成し、
+        # ずれに比例した修正angular_zを付与する。
+        # 推論時はシフトなし(shift_px=0)のまま → 学習・推論の変換が一致。
+        shift_px = random.choice(SHIFT_PIXELS)
+        if shift_px != 0:
+            M = np.float32([[1, 0, shift_px], [0, 1, 0]])
+            cropped = cv2.warpAffine(
+                cropped, M, (IMAGE_WIDTH, IMAGE_HEIGHT),
+                borderMode=cv2.BORDER_REPLICATE
+            )
+            # 右シフト(shift_px>0) → 廊下左寄り → 右に戻る(angular_z 減少)
+            adjusted_angular_z -= shift_px * SHIFT_VEL_PER_PIXEL
+
+        # PyTorchで扱えるようにfloat32へ変換し、[0, 1]に正規化
+        image_normalized = cropped.astype(np.float32) / 255.0
         image_tensor = torch.from_numpy(image_normalized).permute(2, 0, 1)
 
-        return image_tensor, torch.tensor(angular_z, dtype=torch.float32)
+        return image_tensor, torch.tensor([adjusted_angular_z], dtype=torch.float32)
 
 class Config:
     """

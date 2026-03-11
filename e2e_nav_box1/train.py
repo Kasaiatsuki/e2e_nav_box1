@@ -16,7 +16,7 @@ from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
 from e2e_nav_box1.network import Network
 from e2e_nav_box1.image_processor import ImageProcessor
-
+from e2e_nav_box1.shannon_surprise import ShannonSurprise
 
 
 class E2EDataset(Dataset):
@@ -77,6 +77,9 @@ class Config:
         self.learning_rate = config_dict['learning_rate']  # 学習率
         self.num_workers = config_dict['num_workers']      # データロード時のプロセス数
         self.weight_file = config_dict['weight_file']      # 保存する重みファイル名
+        self.num_bins = config_dict.get('num_bins', 7)     # シャノンサプライズ用のビン数 (デフォルト7)
+        self.min_ang = config_dict.get('min_ang', -1.0)    # 角速度の最小範囲
+        self.max_ang = config_dict.get('max_ang', 1.0)     # 角速度の最大範囲
         """
         epochs: 200
         batch_size: 8
@@ -124,12 +127,32 @@ class Trainer:
             num_workers=config.num_workers
         )
 
-        # モデルの生成と、指定の計算デバイス(GPU)への転送
+        # 順伝播(推論)
         self.model = Network().to(self.device)
         # オプティマイザ(最適化アルゴリズム)の設定: AdamW
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.learning_rate)
-        # 損失関数の定義: 平均二乗誤差(MSE)
-        self.mseloss = nn.MSELoss()
+        
+        # --- シャノンサプライズ用の事前準備 ---
+        print("Calculating steering angle distribution for Shannon Surprise...")
+        all_angles = []
+        for img_path in dataset.image_files:
+            csv_file = dataset.angular_vel_dir / f'{img_path.stem}.csv'
+            with open(csv_file, 'r') as f:
+                all_angles.append(float(f.read().strip()))
+        
+        all_angles_tensor = torch.tensor(all_angles, device=self.device)
+        self.surprise_handler = ShannonSurprise(
+            all_angles_tensor, 
+            config.num_bins, 
+            min_val=config.min_ang, 
+            max_val=config.max_ang
+        )
+        print(f"Angle Range: [{config.min_ang}, {config.max_ang}], Bins: {config.num_bins}")
+        print(f"Distribution: {self.surprise_handler.bin_probs.tolist()}")
+        # ------------------------------------
+
+        # 損失関数の定義: 各サンプルの重み付けを可能にするため reduction='none' に設定
+        self.mseloss = nn.MSELoss(reduction='none')
         # TensorBoardへログを出力するためのライター
         self.writer = SummaryWriter(log_dir=str(config.logs_dir))
 
@@ -156,15 +179,25 @@ class Trainer:
                 # 順伝播(推論)
                 outputs = self.model(images)
 
-                # 損失の計算と逆伝播(勾配の計算)
+                # 損失の計算とシャノンサプライズによる重み付け
                 loss = self.mseloss(outputs, targets)
-                loss.backward()
+                
+                # サプライズ（重み）の計算と適用
+                # targets は [batch_size, 1] なので角度のみ取り出す
+                angles = targets.squeeze(1)
+                shannon_weights = self.surprise_handler.compute_weights(angles)
+                
+                # 重みを各サンプルのLossに掛けて合計する
+                weighted_loss = (loss.squeeze(1) * shannon_weights).mean()
+                
+                # 逆伝播(勾配の計算)
+                weighted_loss.backward()
                 
                 # オプティマイザによるパラメータ(重み)の更新
                 self.optimizer.step()
 
-                total_train_loss += loss.item()
-                pbar.set_postfix({'loss': f'{loss.item():.6f}'})
+                total_train_loss += weighted_loss.item()
+                pbar.set_postfix({'loss': f'{weighted_loss.item():.6f}'})
 
             # 平均の訓練ロスと検証ロスを計算
             train_loss = total_train_loss / len(self.train_loader)

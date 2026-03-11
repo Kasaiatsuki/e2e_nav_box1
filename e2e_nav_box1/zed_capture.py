@@ -33,7 +33,7 @@ class ZedCameraWrapper:
             self.camera.retrieve_image(self.zed_image, sl.VIEW.LEFT, sl.MEM.CPU, self.output_resolution)
             full_image = self.zed_image.get_data()
             # 4ch(BGRA) -> 3ch(BGR)
-            return full_image[:, :, :3]
+            return full_image[:, :, :3].copy()
         return None
 
     def close(self) -> None:

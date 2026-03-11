@@ -31,9 +31,12 @@ class ZedCameraWrapper:
         """最新のカメラ画像(左目)をBGR形式(3ch)かつリサイズ済み(640x360)で取得して返す"""
         if self.camera.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
             self.camera.retrieve_image(self.zed_image, sl.VIEW.LEFT, sl.MEM.CPU, self.output_resolution)
-            full_image = self.zed_image.get_data()
+            # numpyの参照を取得し、即座にメモリ連続な配列にコピー（これがないと裂ける）
+            full_image = np.ascontiguousarray(self.zed_image.get_data())
             # 4ch(BGRA) -> 3ch(BGR)
-            return full_image[:, :, :3]
+            bgr_image = full_image[:, :, :3]
+            # スライス（[:, :, :3]）操作で再び非連続になるため、再度連続化して返す
+            return np.ascontiguousarray(bgr_image)
         return None
 
     def close(self) -> None:

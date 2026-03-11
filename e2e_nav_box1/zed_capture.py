@@ -1,6 +1,7 @@
 import pyzed.sl as sl
 from typing import Optional
 import numpy as np
+import cv2
 
 class ZedCameraWrapper:
     """
@@ -19,7 +20,7 @@ class ZedCameraWrapper:
         self.zed_image = sl.Mat()
         self.runtime_params = sl.RuntimeParameters()
         
-        self.output_resolution = sl.Resolution(128, 72)
+        self.output_size = (128, 72)
 
     def open(self) -> None:
         """カメラを開き、初期化する"""
@@ -28,12 +29,15 @@ class ZedCameraWrapper:
             raise RuntimeError(f"Failed to open ZED camera: {err}")
 
     def grab_image(self) -> Optional[np.ndarray]:
-        """最新のカメラ画像(左目)をBGR形式(3ch)かつリサイズ済み(640x360)で取得して返す"""
+        """最新のカメラ画像(左目)をBGR形式(3ch)かつリサイズ済みで取得して返す"""
         if self.camera.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
-            self.camera.retrieve_image(self.zed_image, sl.VIEW.LEFT, sl.MEM.CPU, self.output_resolution)
+            # ネイティブ解像度で取得し、OpenCVでリサイズしてメモリの連続性を保つ（裂け画像の防止）
+            self.camera.retrieve_image(self.zed_image, sl.VIEW.LEFT)
             full_image = self.zed_image.get_data()
             # 4ch(BGRA) -> 3ch(BGR)
-            return full_image[:, :, :3].copy()
+            bgr_image = full_image[:, :, :3]
+            # cv2.resizeを使うことでstride（メモリ確保幅）を正しく整える
+            return cv2.resize(bgr_image, self.output_size)
         return None
 
     def close(self) -> None:

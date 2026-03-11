@@ -21,6 +21,7 @@ class ZedCameraWrapper:
         self.runtime_params = sl.RuntimeParameters()
         
         self.output_size = (128, 72)
+        self.output_resolution = sl.Resolution(640, 360)
 
     def open(self) -> None:
         """カメラを開き、初期化する"""

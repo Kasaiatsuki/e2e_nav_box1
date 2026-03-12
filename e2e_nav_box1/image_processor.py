@@ -13,32 +13,22 @@ class ImageProcessor:
         
         # 水平平行移動シフト拡張のパラメータ
         # ピクセル単位でシフト量を指定し、推論（shift=0）と一貫した変換を使う
-        # 水平平行移動シフト拡張のパラメータ (288x288クロップ解像度に合わせて 128->288 の2.25倍スケール)
-        self.shift_pixels = [-27, -14, 0, 0, 14, 27]
-        self.shift_vel_per_pixel = 0.15 / 13.5
+        # 水平平行移動シフト拡張のパラメータ (256x144解像度に合わせて 128->256 の2倍スケール)
+        self.shift_pixels = [-24, -12, 0, 0, 12, 24]
+        self.shift_vel_per_pixel = 0.15 / 12.0
 
     def preprocess_for_inference(self, image_bgr: np.ndarray) -> torch.Tensor:
         """
         推論前の画像処理。
-        クロップ、正規化、およびCHW形式への変換を行う。
+        リサイズ、正規化、およびCHW形式への変換を行う。
         """
-        image_cropped = self._crop_center(image_bgr)
-        return self._to_tensor(image_cropped)
-
-    def _crop_center(self, image: np.ndarray) -> np.ndarray:
-        """
-        512x288 画像の中央 288x288 をクロップする。
-        """
-        h, w = image.shape[:2]
-        if w == 512 and h == 288:
-            start_x = (512 - 288) // 2
-            return image[:, start_x:start_x+288]
-        return image
+        image_resized = cv2.resize(image_bgr, (256, 144))
+        return self._to_tensor(image_resized)
 
     def augment_and_preprocess(self, image_bgr: np.ndarray, angular_z: float, idx: int) -> Tuple[torch.Tensor, float]:
         """
         学習用のデータ拡張と前処理。
-        左右反転、水平シフト、正規化を行う。
+        左右反転、水平シフト、リサイズ、正規化を行う。
         """
         image = image_bgr.copy()
         adjusted_angular_z = angular_z
@@ -51,16 +41,20 @@ class ImageProcessor:
         # Step3: 水平平行移動シフト
         shift_px = random.choice(self.shift_pixels)
         if shift_px != 0:
-            M = np.float32([[1, 0, shift_px], [0, 1, 0]])
+            # シフト適用前に目標解像度に合わせたサイズ情報を取得（またはリサイズ後にシフトするか検討が必要）
+            # ここでは元画像(512x288)でシフトを行い、その後にリサイズする
+            # シフト量はすでに256px幅ベースで計算されているため、512px幅に換算して適用
+            shift_px_scaled = shift_px * 2
+            M = np.float32([[1, 0, shift_px_scaled], [0, 1, 0]])
             image = cv2.warpAffine(
                 image, M, (image.shape[1], image.shape[0]),
                 borderMode=cv2.BORDER_REPLICATE
             )
-            # 右シフト(shift_px>0) → 廊下左寄り → 右に戻る(angular_z 減少)
+            # 補正は256px幅ベースで行う
             adjusted_angular_z -= shift_px * self.shift_vel_per_pixel
 
-        # Step4: クロップ
-        image = self._crop_center(image)
+        # Step4: リサイズ (512x288 -> 256x144)
+        image = cv2.resize(image, (256, 144))
 
         return self._to_tensor(image), adjusted_angular_z
 

@@ -20,8 +20,8 @@ class ZedCameraWrapper:
         self.zed_image = sl.Mat()
         self.runtime_params = sl.RuntimeParameters()
         
-        self.output_size = (128, 72)
-        self.output_resolution = sl.Resolution(640, 360)
+        self.output_size = (512, 288)
+        self.output_resolution = sl.Resolution(512, 288)
 
     def open(self) -> None:
         """カメラを開き、初期化する"""
@@ -30,12 +30,12 @@ class ZedCameraWrapper:
             raise RuntimeError(f"Failed to open ZED camera: {err}")
 
     def grab_image(self) -> Optional[np.ndarray]:
-        """最新のカメラ画像(左目)をBGR形式(3ch)かつリサイズ済み(128x72)で取得して返す"""
+        """最新のカメラ画像(左目)をBGR形式(3ch)かつリサイズ済み(512x288)で取得して返す"""
         if self.camera.grab(self.runtime_params) == sl.ERROR_CODE.SUCCESS:
-            # 3月7日の正常動作時の実装をベースに、リサイズ先を 128x72 に変更:
+            # 3月7日の正常動作時の実装をベースに、リサイズ先を 512x288 に変更:
             # 1. ネイティブ解像度で取得 (SDK内部リサイズを避ける)
             # 2. NumPyスライスで3チャンネル抽出
-            # 3. OpenCVで 128x72 にリサイズ
+            # 3. OpenCVで 512x288 にリサイズ
             self.camera.retrieve_image(self.zed_image, sl.VIEW.LEFT)
             image = self.zed_image.get_data()
             if image is None: return None
@@ -43,8 +43,8 @@ class ZedCameraWrapper:
             # 4ch(RGBA) -> 3ch(BGR)
             bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
             
-            # 128x72 にリサイズ
-            return cv2.resize(bgr_image, (128, 72), interpolation=cv2.INTER_LINEAR)
+            # 512x288 にリサイズ
+            return cv2.resize(bgr_image, (512, 288), interpolation=cv2.INTER_LINEAR)
         return None
 
     def close(self) -> None:

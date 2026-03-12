@@ -1,6 +1,6 @@
 inference_node:
   ros__parameters:
-    model_name: "e2e_model_0309_3_1_s.pt"
+    model_name: "e2e_model_0312_3_1_s.pt"
     interval_ms: 100
     debug_mode: true
     wait_for_flag: true

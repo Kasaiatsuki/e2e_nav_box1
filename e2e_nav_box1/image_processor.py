@@ -33,30 +33,28 @@ class ImageProcessor:
         image = image_bgr.copy()
         adjusted_angular_z = angular_z
 
-        # Step2: 左右反転（サンプルのインデックスに基づいて1:1で適用）
+        # 左右反転（サンプルのインデックスに基づいて1:1で適用）
         if idx % 2 == 1:
             image = cv2.flip(image, 1)
             adjusted_angular_z = -adjusted_angular_z
 
-        # Step3: 水平平行移動シフト
-        shift_px = random.choice(self.shift_pixels)
-        if shift_px != 0:
-            # シフト適用前に目標解像度に合わせたサイズ情報を取得（またはリサイズ後にシフトするか検討が必要）
-            # ここでは元画像(512x288)でシフトを行い、その後にリサイズする
-            # シフト量はすでに256px幅ベースで計算されているため、512px幅に換算して適用
-            shift_px_scaled = shift_px * 2
-            M = np.float32([[1, 0, shift_px_scaled], [0, 1, 0]])
-            image = cv2.warpAffine(
-                image, M, (image.shape[1], image.shape[0]),
-                borderMode=cv2.BORDER_REPLICATE
-            )
-            # 補正は256px幅ベースで行う
-            adjusted_angular_z -= shift_px * self.shift_vel_per_pixel
-
-        # Step4: リサイズ (512x288 -> 256x144)
+        # リサイズ (512x288 -> 256x144)
+        # シフト処理の前に目標解像度へリサイズを行う
         image = cv2.resize(image, (256, 144))
 
+        # 水平平行移動シフト
+        shift_px = random.choice(self.shift_pixels)
+        if shift_px != 0:
+            # リサイズ済みの画像に対してシフトを適用する（256px基準のシフト量をそのまま使用）
+            M = np.float32([[1, 0, shift_px], [0, 1, 0]])
+            image = cv2.warpAffine(
+                image, M, (256, 144),
+                borderMode=cv2.BORDER_REPLICATE
+            )
+            adjusted_angular_z -= shift_px * self.shift_vel_per_pixel
+
         return self._to_tensor(image), adjusted_angular_z
+
 
     def _to_tensor(self, image: np.ndarray) -> torch.Tensor:
         """

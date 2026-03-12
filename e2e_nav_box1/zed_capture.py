@@ -40,8 +40,10 @@ class ZedCameraWrapper:
             image = self.zed_image.get_data()
             if image is None: return None
             
-            # 4ch(RGBA) -> 3ch(BGR)
-            bgr_image = image[:, :, :3] if image.shape[2] == 4 else image
+            # 4ch(BGRA) -> 3ch(BGR)
+            # .copy()を追加して、メモリを連続(C-contiguous)に変換する。
+            # ※Strideの不一致による画像崩れを防ぐための安全策。
+            bgr_image = image[:, :, :3].copy() if image.shape[2] == 4 else image
             
             # 512x288 にリサイズ
             return cv2.resize(bgr_image, (512, 288), interpolation=cv2.INTER_LINEAR)

@@ -215,16 +215,36 @@ class Trainer:
                 # オプティマイザによるパラメータ(重み)の更新
                 self.optimizer.step()
 
+                # TensorBoardにイテレーションごとのロスを記録
+                self.writer.add_scalar('Loss/train_iteration', weighted_loss.item(), iteration)
+
                 total_train_loss += weighted_loss.item()
                 pbar.set_postfix({'loss': f'{weighted_loss.item():.6f}'})
 
-            # 平均の訓練ロスと検証ロスを計算
+            # 検証 (Validation) ループ
+            self.model.eval()
+            total_val_loss = 0.0
+            with torch.no_grad():
+                for images, targets in self.val_loader:
+                    images = images.to(self.device)
+                    targets = targets.to(self.device)
+                    outputs = self.model(images)
+                    loss = self.mseloss(outputs, targets)
+                    
+                    # 検証時も重みを考慮する場合
+                    angles = targets.squeeze(1)
+                    shannon_weights = self.surprise_handler.compute_weights(angles)
+                    weighted_loss = (loss.squeeze(1) * shannon_weights).mean()
+                    total_val_loss += weighted_loss.item()
+
             train_loss = total_train_loss / len(self.train_loader)
+            val_loss = total_val_loss / len(self.val_loader)
 
-            # TensorBoardに損失をグラフ化するため記録する
+            # TensorBoardに訓練ロスと検証ロスを記録
             self.writer.add_scalar('Loss/train', train_loss, epoch)
+            self.writer.add_scalar('Loss/val', val_loss, epoch)
 
-            print(f'Epoch [{epoch}/{epochs}], Train Loss: {train_loss:.6f}')
+            print(f'Epoch [{epoch}/{epochs}], Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}')
 
         # ループ(for)を抜け、全エポックの学習が完全に終わった後に1回だけモデルを保存する
         weight_file_dest = self.config.weights_dir / self.config.weight_file

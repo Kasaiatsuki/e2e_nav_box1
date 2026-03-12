@@ -169,7 +169,8 @@ class Trainer:
             total_train_loss = 0.0
 
             pbar = tqdm(self.train_loader, desc=f'Epoch {epoch} [Train]')
-            for images, targets in pbar:
+            for batch_i, (images, targets) in enumerate(pbar):
+                iteration = (epoch - 1) * len(self.train_loader) + batch_i
                 images = images.to(self.device)
                 targets = targets.to(self.device)
 
@@ -195,6 +196,9 @@ class Trainer:
                 
                 # オプティマイザによるパラメータ(重み)の更新
                 self.optimizer.step()
+
+                # TensorBoardにイテレーションごとのロスを記録
+                self.writer.add_scalar('Loss/train_iteration', weighted_loss.item(), iteration)
 
                 total_train_loss += weighted_loss.item()
                 pbar.set_postfix({'loss': f'{weighted_loss.item():.6f}'})

@@ -3,7 +3,9 @@
 import sys
 import os
 # パッケージのルートディレクトリを検索パスに追加（直接実行用）
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if package_root not in sys.path:
+    sys.path.insert(0, package_root)
 
 import yaml
 import random

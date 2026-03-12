@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+# TensorBoardの画像表示におけるPillow 10+の互換性問題を解決するためのパッチ
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = getattr(PIL.Image, 'LANCZOS', PIL.Image.BICUBIC)
+
 import sys
 import os
 # パッケージのルートディレクトリを検索パスに追加（直接実行用）

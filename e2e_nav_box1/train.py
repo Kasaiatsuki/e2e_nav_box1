@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 
 import sys
+import os
+# パッケージのルートディレクトリを検索パスに追加（直接実行用）
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 import yaml
 import random
 import torch

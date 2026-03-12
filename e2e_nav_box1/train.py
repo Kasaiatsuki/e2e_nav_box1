@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+# TensorBoardの画像表示におけるPillow 10+の互換性問題を解決するためのパッチ
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = getattr(PIL.Image, 'LANCZOS', PIL.Image.BICUBIC)
+
 import sys
 import os
 # パッケージのルートディレクトリを検索パスに追加（直接実行用）
@@ -159,8 +164,8 @@ class Trainer:
 
         # 損失関数の定義: 各サンプルの重み付けを可能にするため reduction='none' に設定
         self.mseloss = nn.MSELoss(reduction='none')
-        # TensorBoardへログを出力するためのライター
-        self.writer = SummaryWriter(log_dir=str(config.logs_dir))
+        # TensorBoardへログを出力するためのライター (flush_secs=10 でリアルタイム性を向上)
+        self.writer = SummaryWriter(log_dir=str(config.logs_dir), flush_secs=10)
 
         print(f'Using device: {self.device}')
         print(f'Train size: {len(train_dataset)}')

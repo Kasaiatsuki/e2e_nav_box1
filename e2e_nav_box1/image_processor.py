@@ -20,9 +20,20 @@ class ImageProcessor:
     def preprocess_for_inference(self, image_bgr: np.ndarray) -> torch.Tensor:
         """
         推論前の画像処理。
-        正規化、およびCHW形式への変換を行う。
+        クロップ、正規化、およびCHW形式への変換を行う。
         """
-        return self._to_tensor(image_bgr)
+        image_cropped = self._crop_center(image_bgr)
+        return self._to_tensor(image_cropped)
+
+    def _crop_center(self, image: np.ndarray) -> np.ndarray:
+        """
+        512x288 画像の中央 288x288 をクロップする。
+        """
+        h, w = image.shape[:2]
+        if w == 512 and h == 288:
+            start_x = (512 - 288) // 2
+            return image[:, start_x:start_x+288]
+        return image
 
     def augment_and_preprocess(self, image_bgr: np.ndarray, angular_z: float, idx: int) -> Tuple[torch.Tensor, float]:
         """
@@ -47,6 +58,9 @@ class ImageProcessor:
             )
             # 右シフト(shift_px>0) → 廊下左寄り → 右に戻る(angular_z 減少)
             adjusted_angular_z -= shift_px * self.shift_vel_per_pixel
+
+        # Step4: クロップ
+        image = self._crop_center(image)
 
         return self._to_tensor(image), adjusted_angular_z
 

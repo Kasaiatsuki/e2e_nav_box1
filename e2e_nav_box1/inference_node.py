@@ -27,11 +27,11 @@ class InferenceNode(Node):
     def __init__(self) -> None:
         super().__init__('inference_node')
 
-        self.declare_parameter('model_name', rclpy.Parameter.Type.STRING)
-        self.declare_parameter('interval_ms', rclpy.Parameter.Type.INTEGER)
-        self.declare_parameter('debug_mode', rclpy.Parameter.Type.BOOL)
-        self.declare_parameter('wait_for_flag', rclpy.Parameter.Type.BOOL)
-        self.declare_parameter('linear_x', rclpy.Parameter.Type.DOUBLE)
+        self.declare_parameter('model_name', '')
+        self.declare_parameter('interval_ms', 100)
+        self.declare_parameter('debug_mode', False)
+        self.declare_parameter('wait_for_flag', True)
+        self.declare_parameter('linear_x', 0.2)
 
         model_path = self.get_parameter('model_name').value
         interval_ms = self.get_parameter('interval_ms').value

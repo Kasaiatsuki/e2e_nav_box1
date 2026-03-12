@@ -175,7 +175,13 @@ class Trainer:
             total_train_loss = 0.0
 
             pbar = tqdm(self.train_loader, desc=f'Epoch {epoch} [Train]')
-            for images, targets in pbar:
+            for batch_i, (images, targets) in enumerate(pbar):
+                iteration = (epoch - 1) * len(self.train_loader) + batch_i
+                
+                # 最初のエポックの最初のバッチだけ画像を記録する
+                if batch_i == 0:
+                    self.writer.add_images('Train/Images', images, epoch)
+
                 images = images.to(self.device)
                 targets = targets.to(self.device)
 

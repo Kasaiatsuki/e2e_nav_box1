@@ -164,8 +164,8 @@ class Trainer:
 
         # 損失関数の定義: 各サンプルの重み付けを可能にするため reduction='none' に設定
         self.mseloss = nn.MSELoss(reduction='none')
-        # TensorBoardへログを出力するためのライター
-        self.writer = SummaryWriter(log_dir=str(config.logs_dir))
+        # TensorBoardへログを出力するためのライター (flush_secs=10 でリアルタイム性を向上)
+        self.writer = SummaryWriter(log_dir=str(config.logs_dir), flush_secs=10)
 
         print(f'Using device: {self.device}')
         print(f'Train size: {len(train_dataset)}')

@@ -13,9 +13,9 @@ class ImageProcessor:
         
         # 水平平行移動シフト拡張のパラメータ
         # ピクセル単位でシフト量を指定し、推論（shift=0）と一貫した変換を使う
-        # 水平平行移動シフト拡張のパラメータ (512x288解像度に合わせて 128->512 の4倍スケール)
-        self.shift_pixels = [-48, -24, 0, 0, 24, 48]
-        self.shift_vel_per_pixel = 0.15 / 24.0
+        # 水平平行移動シフト拡張のパラメータ (288x288クロップ解像度に合わせて 128->288 の2.25倍スケール)
+        self.shift_pixels = [-27, -14, 0, 0, 14, 27]
+        self.shift_vel_per_pixel = 0.15 / 13.5
 
     def preprocess_for_inference(self, image_bgr: np.ndarray) -> torch.Tensor:
         """

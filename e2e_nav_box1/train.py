@@ -103,8 +103,10 @@ class Config:
         self.weights_dir = package_root / 'weights'
         self.weights_dir.mkdir(exist_ok=True)
 
-        # TensorBoardのログ保存先ディレクトリ
-        self.logs_dir = package_root / 'runs'
+        from datetime import datetime
+        # TensorBoardのログ保存先ディレクトリ (実行ごとにユニークなフォルダを作成)
+        current_time = datetime.now().strftime('%b%d_%H-%M-%S')
+        self.logs_dir = package_root / 'runs' / current_time
 
         # 学習を実行するデバイスの設定(GPU固定)
         self.device = torch.device('cuda')

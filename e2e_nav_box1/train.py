@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 
+# TensorBoardの画像表示におけるPillow 10+の互換性問題を解決するためのパッチ
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = getattr(PIL.Image, 'LANCZOS', PIL.Image.BICUBIC)
+
 import sys
+import os
+# パッケージのルートディレクトリを検索パスに追加（直接実行用）
+package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if package_root not in sys.path:
+    sys.path.insert(0, package_root)
+
 import yaml
 import random
 import torch
@@ -14,18 +25,10 @@ import numpy as np
 from typing import Tuple
 from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
-from torchvision import transforms
 from e2e_nav_box1.network import Network
+from e2e_nav_box1.image_processor import ImageProcessor
+from e2e_nav_box1.shannon_surprise import ShannonSurprise
 
-# 学習・推論の際の画像サイズ（HD720: 1280x720 からクロップして作成）
-IMAGE_WIDTH = 640
-IMAGE_HEIGHT = 360
-
-# 水平平行移動シフト拡張のパラメータ
-# ピクセル単位でシフト量を指定し、推論（shift=0）と一貫した変換を使う
-# 0を2つ入れることで中央（拡張なし）の確率を上げる
-SHIFT_PIXELS = [-60, -30, 0, 0, 30, 60]  # 正: 右シフト（廊下左寄り視点）
-SHIFT_VEL_PER_PIXEL = 0.15 / 30.0        # 30pxあたり0.15 rad/sの補正
 
 class E2EDataset(Dataset):
     """
@@ -37,6 +40,7 @@ class E2EDataset(Dataset):
         self.dataset_dir = dataset_dir
         self.images_dir = dataset_dir / 'images'
         self.angular_vel_dir = dataset_dir / 'angular_vel'
+        self.processor = ImageProcessor()
         # 画像(.png)と対応する録画データ(.csv)が両方揃っているものだけをリスト化する
         all_images = sorted(list(self.images_dir.glob('*.png')))
         self.image_files = []
@@ -64,43 +68,8 @@ class E2EDataset(Dataset):
         with open(csv_file, 'r') as f:
             angular_z = float(f.read().strip())
 
-        # --- データ拡張パイプライン ---
-
-        # Step1: 全体を640×360にリサイズ（全幅視野を保持。曲がり角も見える）
-        cropped = cv2.resize(image_bgr, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_LINEAR)
-        adjusted_angular_z = angular_z
-
-        # Step2: 左右反転（インデックスが奇数のサンプルを反転）
-        # 偶数idx→そのまま, 奇数idx→反転 で確実に1:1の比率になり
-        # 左回りコースのデータのみでも angular_z バイアスを打ち消す
-        if idx % 2 == 1:
-            cropped = cv2.flip(cropped, 1)
-            adjusted_angular_z = -adjusted_angular_z
-
-        # Step3: 水平平行移動シフト
-        # 「廊下内でロボットが中心からずれた視点」を擬似的に作成し、
-        # ずれに比例した修正angular_zを付与する。
-        # 推論時はシフトなし(shift_px=0)のまま → 学習・推論の変換が一致。
-        shift_px = random.choice(SHIFT_PIXELS)
-        if shift_px != 0:
-            M = np.float32([[1, 0, shift_px], [0, 1, 0]])
-            cropped = cv2.warpAffine(
-                cropped, M, (IMAGE_WIDTH, IMAGE_HEIGHT),
-                borderMode=cv2.BORDER_REPLICATE
-            )
-            # 右シフト(shift_px>0) → 廊下左寄り → 右に戻る(angular_z 減少)
-            adjusted_angular_z -= shift_px * SHIFT_VEL_PER_PIXEL
-
-        # Step4: 環境光（明るさ・コントラスト）のランダム変動
-        if random.random() < 0.90:  # 90%の確率で適用
-            # 1. コントラスト (alpha: 0.5 ~ 3.0) と 明るさ (beta: -30 ~ 80) を変動させる
-            alpha = random.uniform(0.5, 3.0)
-            beta = random.randint(-30, 80)
-            cropped = cv2.convertScaleAbs(cropped, alpha=alpha, beta=beta)
-
-        # PyTorchで扱えるようにfloat32へ変換し、[0, 1]に正規化
-        image_normalized = cropped.astype(np.float32) / 255.0
-        image_tensor = torch.from_numpy(image_normalized).permute(2, 0, 1)
+        # データ拡張と前処理
+        image_tensor, adjusted_angular_z = self.processor.augment_and_preprocess(image_bgr, angular_z, idx)
 
         return image_tensor, torch.tensor([adjusted_angular_z], dtype=torch.float32)
 
@@ -119,6 +88,9 @@ class Config:
         self.learning_rate = config_dict['learning_rate']  # 学習率
         self.num_workers = config_dict['num_workers']      # データロード時のプロセス数
         self.weight_file = config_dict['weight_file']      # 保存する重みファイル名
+        self.num_bins = config_dict.get('num_bins', 7)     # シャノンサプライズ用のビン数 (デフォルト7)
+        self.min_ang = config_dict.get('min_ang', -1.0)    # 角速度の最小範囲
+        self.max_ang = config_dict.get('max_ang', 1.0)     # 角速度の最大範囲
         """
         epochs: 200
         batch_size: 8
@@ -131,8 +103,10 @@ class Config:
         self.weights_dir = package_root / 'weights'
         self.weights_dir.mkdir(exist_ok=True)
 
-        # TensorBoardのログ保存先ディレクトリ
-        self.logs_dir = package_root / 'runs'
+        from datetime import datetime
+        # TensorBoardのログ保存先ディレクトリ (実行ごとにユニークなフォルダを作成)
+        current_time = datetime.now().strftime('%b%d_%H-%M-%S')
+        self.logs_dir = package_root / 'runs' / current_time
 
         # 学習を実行するデバイスの設定(GPU固定)
         self.device = torch.device('cuda')
@@ -166,14 +140,34 @@ class Trainer:
             num_workers=config.num_workers
         )
 
-        # モデルの生成と、指定の計算デバイス(GPU)への転送
+        # 順伝播(推論)
         self.model = Network().to(self.device)
         # オプティマイザ(最適化アルゴリズム)の設定: AdamW
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.learning_rate)
-        # 損失関数の定義: 平均二乗誤差(MSE)
-        self.mseloss = nn.MSELoss()
-        # TensorBoardへログを出力するためのライター
-        self.writer = SummaryWriter(log_dir=str(config.logs_dir))
+        
+        # --- シャノンサプライズ用の事前準備 ---
+        print("Calculating steering angle distribution for Shannon Surprise...")
+        all_angles = []
+        for img_path in dataset.image_files:
+            csv_file = dataset.angular_vel_dir / f'{img_path.stem}.csv'
+            with open(csv_file, 'r') as f:
+                all_angles.append(float(f.read().strip()))
+        
+        all_angles_tensor = torch.tensor(all_angles, device=self.device)
+        self.surprise_handler = ShannonSurprise(
+            all_angles_tensor, 
+            config.num_bins, 
+            min_val=config.min_ang, 
+            max_val=config.max_ang
+        )
+        print(f"Angle Range: [{config.min_ang}, {config.max_ang}], Bins: {config.num_bins}")
+        print(f"Distribution: {self.surprise_handler.bin_probs.tolist()}")
+        # ------------------------------------
+
+        # 損失関数の定義: 各サンプルの重み付けを可能にするため reduction='none' に設定
+        self.mseloss = nn.MSELoss(reduction='none')
+        # TensorBoardへログを出力するためのライター (flush_secs=10 でリアルタイム性を向上)
+        self.writer = SummaryWriter(log_dir=str(config.logs_dir), flush_secs=10)
 
         print(f'Using device: {self.device}')
         print(f'Train size: {len(train_dataset)}')
@@ -188,7 +182,13 @@ class Trainer:
             total_train_loss = 0.0
 
             pbar = tqdm(self.train_loader, desc=f'Epoch {epoch} [Train]')
-            for images, targets in pbar:
+            for batch_i, (images, targets) in enumerate(pbar):
+                iteration = (epoch - 1) * len(self.train_loader) + batch_i
+                
+                # 最初のエポックの最初のバッチだけ画像を記録する
+                if batch_i == 0:
+                    self.writer.add_images('Train/Images', images, epoch)
+
                 images = images.to(self.device)
                 targets = targets.to(self.device)
 
@@ -198,23 +198,53 @@ class Trainer:
                 # 順伝播(推論)
                 outputs = self.model(images)
 
-                # 損失の計算と逆伝播(勾配の計算)
+                # 損失の計算とシャノンサプライズによる重み付け
                 loss = self.mseloss(outputs, targets)
-                loss.backward()
+                
+                # サプライズ（重み）の計算と適用
+                # targets は [batch_size, 1] なので角度のみ取り出す
+                angles = targets.squeeze(1)
+                shannon_weights = self.surprise_handler.compute_weights(angles)
+                
+                # 重みを各サンプルのLossに掛けて合計する
+                weighted_loss = (loss.squeeze(1) * shannon_weights).mean()
+                
+                # 逆伝播(勾配の計算)
+                weighted_loss.backward()
                 
                 # オプティマイザによるパラメータ(重み)の更新
                 self.optimizer.step()
 
-                total_train_loss += loss.item()
-                pbar.set_postfix({'loss': f'{loss.item():.6f}'})
+                # TensorBoardにイテレーションごとのロスを記録
+                self.writer.add_scalar('Loss/train_iteration', weighted_loss.item(), iteration)
 
-            # 平均の訓練ロスと検証ロスを計算
+                total_train_loss += weighted_loss.item()
+                pbar.set_postfix({'loss': f'{weighted_loss.item():.6f}'})
+
+            # 検証 (Validation) ループ
+            self.model.eval()
+            total_val_loss = 0.0
+            with torch.no_grad():
+                for images, targets in self.val_loader:
+                    images = images.to(self.device)
+                    targets = targets.to(self.device)
+                    outputs = self.model(images)
+                    loss = self.mseloss(outputs, targets)
+                    
+                    # 検証時も重みを考慮する場合
+                    angles = targets.squeeze(1)
+                    shannon_weights = self.surprise_handler.compute_weights(angles)
+                    weighted_loss = (loss.squeeze(1) * shannon_weights).mean()
+                    total_val_loss += weighted_loss.item()
+
             train_loss = total_train_loss / len(self.train_loader)
+            val_loss = total_val_loss / len(self.val_loader)
 
-            # TensorBoardに損失をグラフ化するため記録する
+            # TensorBoardに訓練ロスと検証ロスを記録
             self.writer.add_scalar('Loss/train', train_loss, epoch)
+            self.writer.add_scalar('Loss/val', val_loss, epoch)
 
-            print(f'Epoch [{epoch}/{epochs}], Train Loss: {train_loss:.6f}')
+            print(f'Epoch [{epoch}/{epochs}], Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}')
 
         # ループ(for)を抜け、全エポックの学習が完全に終わった後に1回だけモデルを保存する
         weight_file_dest = self.config.weights_dir / self.config.weight_file

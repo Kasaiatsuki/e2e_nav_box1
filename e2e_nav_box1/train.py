@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-
-# TensorBoardの画像表示におけるPillow 10+の互換性問題を解決するためのパッチ
-import PIL.Image
-if not hasattr(PIL.Image, 'ANTIALIAS'):
-    PIL.Image.ANTIALIAS = getattr(PIL.Image, 'LANCZOS', PIL.Image.BICUBIC)
-
 import sys
 import os
 # パッケージのルートディレクトリを検索パスに追加（直接実行用）
@@ -17,7 +10,6 @@ import random
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
-from torch.utils.tensorboard import SummaryWriter
 import cv2
 import csv
 from pathlib import Path
@@ -28,6 +20,7 @@ from schedulefree import RAdamScheduleFree
 from e2e_nav_box1.network import Network
 from e2e_nav_box1.image_processor import ImageProcessor
 from e2e_nav_box1.shannon_surprise import ShannonSurprise
+from e2e_nav_box1.tensorboard_utils import TensorBoardLogger
 
 
 class E2EDataset(Dataset):
@@ -166,8 +159,9 @@ class Trainer:
 
         # 損失関数の定義: 各サンプルの重み付けを可能にするため reduction='none' に設定
         self.mseloss = nn.MSELoss(reduction='none')
-        # TensorBoardへログを出力するためのライター (flush_secs=10 でリアルタイム性を向上)
-        self.writer = SummaryWriter(log_dir=str(config.logs_dir), flush_secs=10)
+
+        # TensorBoardへログを出力するためのライター
+        self.writer = TensorBoardLogger(log_dir=config.logs_dir)
 
         print(f'Using device: {self.device}')
         print(f'Train size: {len(train_dataset)}')

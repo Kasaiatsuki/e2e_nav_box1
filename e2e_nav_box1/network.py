@@ -5,47 +5,61 @@ import torch.nn as nn
 
 class Network(nn.Module):
     """
-    End-to-Endプランニング用の畳み込みニューラルネットワーク(CNN)モデル。
-
+    End-to-Endプランニング用の改善されたCNNモデル。
+    畳み込み層を増やして特徴抽出を強化し、全結合層のパラメータを削減した構成。
     """
     def __init__(self):
         super(Network, self).__init__()
 
-        # Conv層1: 入力チャンネル3 (RGB画像)、出力チャンネル32、カーネルサイズ8、ストライド4
-        # 画像の特徴量を大まかに抽出する最初の層
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=8, stride=4)
+        # 入力: (3, 144, 256)
         
-        # Conv層2: 入力チャンネル32、出力チャンネル64、カーネルサイズ3、ストライド2
-        # より中程度のレベルの特徴量を抽出する層
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2)
+        # Conv層1: 5x5, stride 2, 32ch -> 出力: (32, 70, 126)
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=5, stride=2, padding=2)
+        self.bn1 = nn.BatchNorm2d(32)
         
-        # Conv層3: 入力チャンネル64、出力チャンネル64、カーネルサイズ3、ストライド1
-        # より高次で詳細な特徴量を抽出する層
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
+        # Conv層2: 3x3, stride 2, 64ch -> 出力: (64, 34, 62)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
         
-        # 全結合層(Fully Connected Layer)の前に2次元のテンソルを1次元に平坦化(Flatten)するための層
+        # Conv層3: 3x3, stride 2, 128ch -> 出力: (128, 16, 30)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        
+        # Conv層4: 3x3, stride 2, 256ch -> 出力: (256, 8, 15)
+        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(256)
+        
+        # Conv層5: 3x3, stride 2, 256ch -> 出力: (256, 4, 8)
+        self.conv5 = nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1)
+        self.bn5 = nn.BatchNorm2d(256)
+        
+        # 平坦化
         self.flatten = nn.Flatten()
         
-        # 全結合層1: 入力数27840 (256x144画像の場合の平坦化サイズ: 64*29*15)
-        self.fc1 = nn.Linear(27840, 512)
+        # 全結合層: (256, 5, 8) -> 10240
+        self.fc1 = nn.Linear(10240, 256)
+        self.dropout = nn.Dropout(0.5)
         
-        # 全結合層2(出力層): 角速度出力
-        self.fc2 = nn.Linear(512, 1)
+        # 出力層: 角速度
+        self.fc2 = nn.Linear(256, 1)
 
-        # 活性化関数: ReLU (Rectified Linear Unit)
         self.relu = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        順伝播(Forward pass)の処理を定義する。
-        各畳み込み層と全結合層(fc1)の後にReLU活性化関数を適用する。
-        最終層(fc2)では活性化関数を通さずに直接出力する。
+        順伝播処理。
+        各畳み込み層の後にBNとReLUを適用。
         """
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.relu(self.conv3(x))
-        x = self.flatten(x)        # 畳み込みから全結合層へ繋ぐための平坦化
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.relu(self.bn2(self.conv2(x)))
+        x = self.relu(self.bn3(self.conv3(x)))
+        x = self.relu(self.bn4(self.conv4(x)))
+        x = self.relu(self.bn5(self.conv5(x)))
+        
+        x = self.flatten(x)
+        
         x = self.relu(self.fc1(x))
-        x = self.fc2(x)            # 出力 (x, y が1次元配列として並んだもの)
+        x = self.dropout(x)
+        x = self.fc2(x)
 
         return x

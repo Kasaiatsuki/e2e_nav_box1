@@ -157,6 +157,9 @@ class Trainer:
         print(f"Distribution: {self.surprise_handler.bin_probs.tolist()}")
         # ------------------------------------
 
+        # 損失関数の定義: 各サンプルの重み付けを可能にするため reduction='none' に設定
+        self.mseloss = nn.MSELoss(reduction='none')
+
         # TensorBoardへログを出力するためのライター
         self.writer = TensorBoardLogger(log_dir=config.logs_dir)
 

@@ -36,8 +36,8 @@ class Network(nn.Module):
         # 平坦化
         self.flatten = nn.Flatten()
         
-        # 全結合層: 実行時に動的に入力サイズを決定する
-        self.fc1 = None  # forward内で初期化
+        # 全結合層: (256, 5, 8) -> 10240
+        self.fc1 = nn.Linear(10240, 256)
         self.dropout = nn.Dropout(0.5)
         
         # 出力層: 角速度
@@ -57,12 +57,6 @@ class Network(nn.Module):
         x = self.relu(self.bn5(self.conv5(x)))
         
         x = self.flatten(x)
-        
-        # FC1層を動的に初期化（最初の推論時のみ）
-        if self.fc1 is None:
-            n_size = x.shape[1]
-            self.fc1 = nn.Linear(n_size, 256).to(x.device)
-            print(f"[Network] Dynamic FC1 input size: {n_size}")
         
         x = self.relu(self.fc1(x))
         x = self.dropout(x)

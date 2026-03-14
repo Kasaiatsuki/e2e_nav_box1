@@ -19,7 +19,6 @@ from tqdm import tqdm
 from schedulefree import RAdamScheduleFree
 from e2e_nav_box1.network import Network
 from e2e_nav_box1.image_processor import ImageProcessor
-from e2e_nav_box1.shannon_surprise import ShannonSurprise
 from e2e_nav_box1.tensorboard_utils import TensorBoardLogger
 
 
@@ -37,10 +36,43 @@ class E2EDataset(Dataset):
         # 画像(.png)と対応する録画データ(.csv)が両方揃っているものだけをリスト化する
         all_images = sorted(list(self.images_dir.glob('*.png')))
         self.image_files = []
+        
+        zero_velocity_count = 0
+        kept_zero_velocity_count = 0
+        
         for img_path in all_images:
             csv_file = self.angular_vel_dir / f'{img_path.stem}.csv'
             if csv_file.exists():
-                self.image_files.append(img_path)
+                # 角速度を読み込んでスキップ判定を行う
+                with open(csv_file, 'r') as f:
+                    try:
+                        angular_z = float(f.read().strip())
+                    except ValueError:
+                        continue
+                
+                # 直線(angular_zがほぼ0)のデータを減らす処理
+                if self.reduce_linner(angular_z):
+                    self.image_files.append(img_path)
+                    if abs(angular_z) < 1e-9:
+                        kept_zero_velocity_count += 1
+                elif abs(angular_z) < 1e-9:
+                    zero_velocity_count += 1
+        
+        print(f"Dataset initialization:")
+        print(f"  Total images found: {len(all_images)}")
+        print(f"  Zero velocity images reduced: {zero_velocity_count}")
+        print(f"  Zero velocity images kept: {kept_zero_velocity_count}")
+        print(f"  Total images kept: {len(self.image_files)}")
+
+    def reduce_linner(self, angular_z: float) -> bool:
+        """
+        直線(角速度がほぼ0)のデータを一定の確率で間引く。
+        返り値: Trueの場合データを保持、Falseの場合スキップ
+        """
+        if abs(angular_z) < 1e-9:
+            # 1/3の確率で保持 (2/3の確率でスキップ)
+            return random.random() < 1/3
+        return True
 
     def __len__(self) -> int:
         """データセットの総サンプル数を返す"""
@@ -81,9 +113,6 @@ class Config:
         self.learning_rate = config_dict['learning_rate']  # 学習率
         self.num_workers = config_dict['num_workers']      # データロード時のプロセス数
         self.weight_file = config_dict['weight_file']      # 保存する重みファイル名
-        self.num_bins = config_dict.get('num_bins', 7)     # シャノンサプライズ用のビン数 (デフォルト7)
-        self.min_ang = config_dict.get('min_ang', -1.0)    # 角速度の最小範囲
-        self.max_ang = config_dict.get('max_ang', 1.0)     # 角速度の最大範囲
         """
         epochs: 200
         batch_size: 8
@@ -138,27 +167,8 @@ class Trainer:
         # オプティマイザ(最適化アルゴリズム)の設定: AdamW
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.learning_rate)
         
-        # --- シャノンサプライズ用の事前準備 ---
-        print("Calculating steering angle distribution for Shannon Surprise...")
-        all_angles = []
-        for img_path in dataset.image_files:
-            csv_file = dataset.angular_vel_dir / f'{img_path.stem}.csv'
-            with open(csv_file, 'r') as f:
-                all_angles.append(float(f.read().strip()))
-        
-        all_angles_tensor = torch.tensor(all_angles, device=self.device)
-        self.surprise_handler = ShannonSurprise(
-            all_angles_tensor, 
-            config.num_bins, 
-            min_val=config.min_ang, 
-            max_val=config.max_ang
-        )
-        print(f"Angle Range: [{config.min_ang}, {config.max_ang}], Bins: {config.num_bins}")
-        print(f"Distribution: {self.surprise_handler.bin_probs.tolist()}")
-        # ------------------------------------
-
-        # 損失関数の定義: 各サンプルの重み付けを可能にするため reduction='none' に設定
-        self.mseloss = nn.MSELoss(reduction='none')
+        # 損失関数の定義: MSELoss
+        self.mseloss = nn.MSELoss()
 
         # TensorBoardへログを出力するためのライター
         self.writer = TensorBoardLogger(log_dir=config.logs_dir)
@@ -192,28 +202,20 @@ class Trainer:
                 # 順伝播(推論)
                 outputs = self.model(images)
 
-                # 損失の計算とシャノンサプライズによる重み付け
+                # 損失の計算
                 loss = self.mseloss(outputs, targets)
                 
-                # サプライズ（重み）の計算と適用
-                # targets は [batch_size, 1] なので角度のみ取り出す
-                angles = targets.squeeze(1)
-                shannon_weights = self.surprise_handler.compute_weights(angles)
-                
-                # 重みを各サンプルのLossに掛けて合計する
-                weighted_loss = (loss.squeeze(1) * shannon_weights).mean()
-                
                 # 逆伝播(勾配の計算)
-                weighted_loss.backward()
+                loss.backward()
                 
                 # オプティマイザによるパラメータ(重み)の更新
                 self.optimizer.step()
 
                 # TensorBoardにイテレーションごとのロスを記録
-                self.writer.add_scalar('Loss/train_iteration', weighted_loss.item(), iteration)
+                self.writer.add_scalar('Loss/train_iteration', loss.item(), iteration)
 
-                total_train_loss += weighted_loss.item()
-                pbar.set_postfix({'loss': f'{weighted_loss.item():.6f}'})
+                total_train_loss += loss.item()
+                pbar.set_postfix({'loss': f'{loss.item():.6f}'})
 
             # 検証 (Validation) ループ
             self.model.eval()
@@ -224,12 +226,7 @@ class Trainer:
                     targets = targets.to(self.device)
                     outputs = self.model(images)
                     loss = self.mseloss(outputs, targets)
-                    
-                    # 検証時も重みを考慮する場合
-                    angles = targets.squeeze(1)
-                    shannon_weights = self.surprise_handler.compute_weights(angles)
-                    weighted_loss = (loss.squeeze(1) * shannon_weights).mean()
-                    total_val_loss += weighted_loss.item()
+                    total_val_loss += loss.item()
 
             train_loss = total_train_loss / len(self.train_loader)
             val_loss = total_val_loss / len(self.val_loader)

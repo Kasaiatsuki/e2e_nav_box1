@@ -1,9 +1,6 @@
-epochs: 200
+epochs: 100
 batch_size: 8
 learning_rate: 0.0002
 num_workers: 8
 #weight_file: "e2e_model.pt"
-weight_file: "e2e_model_0312_t_1_g.pt"
-num_bins: 7
-min_ang: -1.0
-max_ang: 1.0
+weight_file: "e2e_model_0314_t_1_g.pt"

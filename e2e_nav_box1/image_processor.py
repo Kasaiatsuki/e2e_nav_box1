@@ -53,6 +53,12 @@ class ImageProcessor:
             )
             adjusted_angular_z -= shift_px * self.shift_vel_per_pixel
 
+        # 環境光（明るさ・コントラスト）のランダム変動
+        if random.random() < 0.90:  # 90%の確率で適用
+            alpha = random.uniform(0.5, 3.0)
+            beta = random.randint(-30, 80)
+            image = cv2.convertScaleAbs(image, alpha=alpha, beta=beta)
+
         return self._to_tensor(image), adjusted_angular_z
 
 
